@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Senior Engineer",
+    "company": "Acme",
+    "description": "hello",
+    "direct_apply_url": "https://example.com/job/1",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "2026-01-01T00:00:00.000Z",
+    "location": "Remote",
+    "posted_at": "2026-01-01"
+  },
+  {
+    "title": "Only Title",
+    "company": "",
+    "description": "",
+    "direct_apply_url": "https://example.com/job/2",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "2026-01-01T00:00:00.000Z",
+    "location": "",
+    "posted_at": ""
+  },
+  {
+    "title": "",
+    "company": "",
+    "description": "",
+    "direct_apply_url": "",
+    "ats_platform_name": "",
+    "scraped_timestamp": "2026-01-01T00:00:00.000Z",
+    "location": "",
+    "posted_at": ""
+  }
+]

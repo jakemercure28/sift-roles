@@ -1,0 +1,12 @@
+{
+  "account": { "name": "Globex LLC" },
+  "jobs": [
+    {
+      "title": "SRE",
+      "id": 777,
+      "full_description": "Reliability &mdash; on-call",
+      "telecommuting": true,
+      "created_at": "2026-05-02"
+    }
+  ]
+}

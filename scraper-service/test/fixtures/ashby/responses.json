@@ -1,0 +1,54 @@
+{
+  "wayne": {
+    "jobs": [
+      {
+        "title": "Senior DevOps Engineer",
+        "jobUrl": "https://jobs.ashbyhq.com/wayne/0001",
+        "descriptionPlain": "Run the platform at scale.",
+        "compensation": {
+          "scrapeableCompensationSalarySummary": "$180k - $220k"
+        },
+        "companyName": "Wayne Enterprises",
+        "address": {
+          "postalAddress": {
+            "addressLocality": "Gotham",
+            "addressRegion": "NJ",
+            "addressCountry": "USA"
+          }
+        },
+        "secondaryLocations": [
+          { "location": "Remote - US" },
+          null,
+          { "locationName": "Metropolis" }
+        ],
+        "updatedAt": "2026-05-10T00:00:00Z",
+        "publishedAt": "2026-05-01T00:00:00Z"
+      },
+      {
+        "title": "Barista",
+        "jobUrl": "https://jobs.ashbyhq.com/wayne/0002",
+        "descriptionPlain": "Coffee",
+        "location": "Gotham"
+      }
+    ]
+  },
+  "oscorp": {
+    "jobs": [
+      {
+        "title": "Platform Engineer",
+        "jobUrl": "https://jobs.ashbyhq.com/oscorp/1001",
+        "descriptionHtml": "<p>Build &amp; scale the platform</p>",
+        "compensation": { "compensationTierSummary": "Tier 3" },
+        "workplaceType": "Remote",
+        "updatedAt": "",
+        "publishedAt": "2026-04-20T00:00:00Z"
+      },
+      {
+        "title": "SRE",
+        "jobUrl": "https://jobs.ashbyhq.com/oscorp/1002",
+        "descriptionPlain": "Reliability and on-call",
+        "locationName": "London"
+      }
+    ]
+  }
+}

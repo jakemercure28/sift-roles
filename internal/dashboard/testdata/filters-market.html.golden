@@ -1,0 +1,22 @@
+
+<div class="content-filters" id="dashboard-filters">
+  <div class="dd-wrap">
+    <button class="loc-trigger" id="loc-panel-btn" onclick="toggleLocPanel()" title="Location">
+      <span>All locations</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div id="loc-panel" class="loc-dropdown">
+      <button class="menu-item active" onclick="setLocationPref('')">All locations</button><button class="menu-item" onclick="setLocationPref('seattle')">Seattle</button><button class="menu-item" onclick="setLocationPref('portland')">Portland</button><button class="menu-item" onclick="setLocationPref('sf-bay')">SF Bay Area</button><button class="menu-item" onclick="setLocationPref('la')">Los Angeles</button><button class="menu-item" onclick="setLocationPref('san-diego')">San Diego</button><button class="menu-item" onclick="setLocationPref('nyc')">New York</button><button class="menu-item" onclick="setLocationPref('boston')">Boston</button><button class="menu-item" onclick="setLocationPref('austin')">Austin</button><button class="menu-item" onclick="setLocationPref('denver')">Denver / Boulder</button><button class="menu-item" onclick="setLocationPref('chicago')">Chicago</button><button class="menu-item" onclick="setLocationPref('dc')">DC / Northern Virginia</button><button class="menu-item" onclick="setLocationPref('atlanta')">Atlanta</button>
+      <div class="menu-divider"></div>
+    <button class="menu-item loc-toggle-row" role="switch" aria-checked="false" onclick="setRemotePref(true)">
+      <span>Remote only</span>
+      <span class="loc-toggle" aria-hidden="true"></span>
+    </button>
+      <button class="menu-item loc-toggle-row loc-unlisted-row" role="switch" aria-checked="true" onclick="setLocationPref('', false)">
+      <span>Include unlisted</span>
+      <span class="loc-toggle on" aria-hidden="true"></span>
+    </button>
+    </div>
+  </div>
+  
+</div>

@@ -1,0 +1,152 @@
+{
+  "seattle": {
+    "label": "Seattle",
+    "cities": [
+      "seattle",
+      "bellevue",
+      "redmond",
+      "kirkland",
+      "bothell",
+      "everett",
+      "tacoma",
+      "renton",
+      "tukwila",
+      "issaquah",
+      "sammamish",
+      "mercer island",
+      "lynnwood",
+      "kent",
+      "auburn",
+      "lakewood",
+      "bremerton",
+      "olympia"
+    ],
+    "states": ["wa"]
+  },
+  "portland": {
+    "label": "Portland",
+    "cities": [
+      "portland",
+      "beaverton",
+      "hillsboro",
+      "tigard",
+      "lake oswego",
+      "vancouver"
+    ],
+    "states": ["or"]
+  },
+  "sf-bay": {
+    "label": "SF Bay Area",
+    "cities": [
+      "san francisco",
+      "oakland",
+      "berkeley",
+      "palo alto",
+      "mountain view",
+      "san jose",
+      "sunnyvale",
+      "san mateo",
+      "redwood city",
+      "menlo park",
+      "fremont",
+      "santa clara",
+      "cupertino",
+      "burlingame",
+      "south san francisco",
+      "emeryville",
+      "alameda",
+      "hayward",
+      "san bruno"
+    ],
+    "states": []
+  },
+  "la": {
+    "label": "Los Angeles",
+    "cities": [
+      "los angeles",
+      "santa monica",
+      "culver city",
+      "pasadena",
+      "burbank",
+      "long beach",
+      "irvine",
+      "el segundo",
+      "venice",
+      "playa vista",
+      "manhattan beach"
+    ],
+    "states": []
+  },
+  "san-diego": {
+    "label": "San Diego",
+    "cities": ["san diego", "la jolla", "carlsbad", "del mar", "encinitas"],
+    "states": []
+  },
+  "nyc": {
+    "label": "New York",
+    "cities": [
+      "new york",
+      "manhattan",
+      "brooklyn",
+      "queens",
+      "bronx",
+      "jersey city",
+      "hoboken",
+      "newark"
+    ],
+    "states": []
+  },
+  "boston": {
+    "label": "Boston",
+    "cities": [
+      "boston",
+      "cambridge",
+      "somerville",
+      "watertown",
+      "waltham",
+      "burlington"
+    ],
+    "states": ["ma"]
+  },
+  "austin": {
+    "label": "Austin",
+    "cities": ["austin", "round rock", "cedar park", "pflugerville"],
+    "states": []
+  },
+  "denver": {
+    "label": "Denver / Boulder",
+    "cities": [
+      "denver",
+      "boulder",
+      "broomfield",
+      "westminster",
+      "lakewood",
+      "aurora",
+      "louisville"
+    ],
+    "states": ["co"]
+  },
+  "chicago": {
+    "label": "Chicago",
+    "cities": ["chicago", "evanston", "naperville", "schaumburg"],
+    "states": ["il"]
+  },
+  "dc": {
+    "label": "DC / Northern Virginia",
+    "cities": [
+      "washington",
+      "arlington",
+      "alexandria",
+      "reston",
+      "tysons",
+      "mclean",
+      "bethesda"
+    ],
+    "states": ["dc"]
+  },
+  "atlanta": {
+    "label": "Atlanta",
+    "cities": ["atlanta", "alpharetta", "marietta", "sandy springs"],
+    "states": ["ga"]
+  }
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "Acme",
+    "description": "Operate the platform",
+    "direct_apply_url": "https://apply.workable.com/acme/j/ABC123",
+    "ats_platform_name": "Workable",
+    "scraped_timestamp": "",
+    "location": "Berlin, Remote",
+    "posted_at": "2026-05-01"
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "Globex",
+    "description": "Build the platform",
+    "direct_apply_url": "https://example.com/job/2",
+    "ats_platform_name": "Arbeitnow",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2026-05-02"
+  }
+]

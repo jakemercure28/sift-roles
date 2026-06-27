@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title><![CDATA[Acme Corp: Senior DevOps Engineer]]></title>
+      <link>https://weworkremotely.com/remote-jobs/acme-devops</link>
+      <pubDate>Wed, 01 May 2026 12:00:00 +0000</pubDate>
+      <description><![CDATA[<p>Run &amp; scale the platform</p>]]></description>
+      <region>Worldwide</region>
+    </item>
+    <item>
+      <title>Globex: Platform Engineer</title>
+      <link>https://weworkremotely.com/remote-jobs/globex-platform</link>
+      <pubDate>Thu, 02 May 2026 00:00:00 +0000</pubDate>
+      <description>Build the platform</description>
+    </item>
+    <item>
+      <title><![CDATA[Cafe: Barista]]></title>
+      <link>https://weworkremotely.com/remote-jobs/cafe-barista</link>
+      <description>Coffee</description>
+    </item>
+    <item>
+      <title><![CDATA[NoLink Inc: DevOps Helper]]></title>
+      <description>Missing link, should be skipped</description>
+    </item>
+  </channel>
+</rss>

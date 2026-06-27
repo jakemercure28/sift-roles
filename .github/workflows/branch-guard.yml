@@ -1,0 +1,26 @@
+name: Branch guard
+
+# Enforces the promotion path: PRs into main may only come from dev. Combined
+# with branch protection (no direct pushes to main) this guarantees prod is only
+# ever deployed from code that already passed through dev/staging.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$HEAD_REF" != "dev" ]; then
+            echo "::error::PRs into main must come from dev (got '$HEAD_REF')."
+            exit 1
+          fi
+          echo "OK: PR source is dev."

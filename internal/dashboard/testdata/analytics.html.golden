@@ -1,0 +1,91 @@
+
+<div class="analytics-report">
+  
+  <div class="report-band">
+    <h3 class="report-subhead">Pipeline health</h3>
+    <div class="stat-strip">
+      
+    <div class="stat-item">
+      <div class="stat-num">9</div>
+      <div class="stat-label">Applied</div>
+      <div class="stat-sub">all-time</div>
+    </div>
+      
+    <div class="stat-item">
+      <div class="stat-num">3</div>
+      <div class="stat-label">Rejected</div>
+      <div class="stat-sub">all-time</div>
+    </div>
+      
+    <div class="stat-item">
+      <div class="stat-num">56%</div>
+      <div class="stat-label">Response rate</div>
+      <div class="stat-sub">5 of 9</div>
+    </div>
+      
+    <div class="stat-item">
+      <div class="stat-num">44%</div>
+      <div class="stat-label">Interview rate</div>
+      <div class="stat-sub">4 of 9</div>
+    </div>
+      
+    <div class="stat-item">
+      <div class="stat-num">3</div>
+      <div class="stat-label">Active pipeline</div>
+      <div class="stat-sub">open right now</div>
+    </div>
+      
+    <div class="stat-item">
+      <div class="stat-num">1</div>
+      <div class="stat-label">Stale</div>
+      <div class="stat-sub">applied &gt; 21d, no reply</div>
+    </div>
+    </div>
+  </div>
+  
+  <div class="report-band">
+    <h3 class="report-subhead">Pipeline funnel <span class="report-subhead-note">all-time</span></h3>
+    <div class="an-funnel an-funnel-cols">
+      <div class="an-funnel-col">
+        <div class="an-funnel-label">Applied</div>
+        <div class="an-funnel-num"><span style="font-family:var(--font-mono)">9</span></div>
+        <div class="an-funnel-bar"><span style="width:100%"></span></div>
+      </div>
+      <div class="an-funnel-col">
+        <div class="an-funnel-label">Phone screen</div>
+        <div class="an-funnel-num"><span style="font-family:var(--font-mono)">1</span></div>
+        <div class="an-funnel-bar"><span style="width:11%"></span></div>
+      </div>
+      <div class="an-funnel-col">
+        <div class="an-funnel-label">Interview</div>
+        <div class="an-funnel-num"><span style="font-family:var(--font-mono)">4</span></div>
+        <div class="an-funnel-bar"><span style="width:44%"></span></div>
+      </div>
+      <div class="an-funnel-col">
+        <div class="an-funnel-label">Onsite</div>
+        <div class="an-funnel-num"><span style="font-family:var(--font-mono)">0</span></div>
+        <div class="an-funnel-bar"><span style="width:0%"></span></div>
+      </div>
+      <div class="an-funnel-col">
+        <div class="an-funnel-label">Offer</div>
+        <div class="an-funnel-num"><span style="font-family:var(--font-mono)">0</span></div>
+        <div class="an-funnel-bar"><span style="width:0%"></span></div>
+      </div>
+    </div>
+    <p class="analytics-hint" style="margin-top:10px">Interview conversion: 4 of 9 (44%).</p>
+  </div>
+  
+  <div class="report-band">
+    <h3 class="report-subhead">Timing summary</h3>
+    <p class="analytics-hint">Avg rejection: <span style="font-family:var(--font-mono)">10.0</span>d (1/2). Avg posting age: <span style="font-family:var(--font-mono)">5.0</span>d (1/2).</p>
+    <table class="calibration-table report-table"><thead><tr><th>Company</th><th>Role</th><th>Score</th><th>Stage</th><th>Days to Reject</th><th>Posting Age</th></tr></thead><tbody>
+    <tr>
+      <td>Globex</td>
+      <td>SRE</td>
+      <td><span class="score-pill score-mid">6</span></td>
+      <td>interview</td>
+      <td><span style="color:#8A8A8A;font-family:var(--font-mono)">10d</span></td>
+      <td><span style="color:#8A8A8A;font-family:var(--font-mono)">5d</span></td>
+    </tr></tbody></table>
+  </div>
+</div>

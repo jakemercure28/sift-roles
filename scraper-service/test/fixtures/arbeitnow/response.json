@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "title": "Senior DevOps Engineer",
+      "url": "https://apply.workable.com/acme/j/ABC123",
+      "company_name": "Acme",
+      "description": "<p>Operate the platform</p>",
+      "location": ["Berlin", "Remote"],
+      "remote": true,
+      "created_at": "2026-05-01"
+    },
+    {
+      "title": "Platform Engineer",
+      "url": "https://example.com/job/2",
+      "company_name": "Globex",
+      "description": "Build the platform",
+      "location": [],
+      "remote": true,
+      "created_at": "2026-05-02"
+    },
+    {
+      "title": "Gardener",
+      "url": "https://example.com/job/3",
+      "company_name": "Green Co"
+    }
+  ]
+}

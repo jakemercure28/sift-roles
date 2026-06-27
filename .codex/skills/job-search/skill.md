@@ -1,0 +1,111 @@
+---
+name: job-search
+description: >
+  Review pending job listings, approve/reject them, check stats, run the pipeline.
+  Use when asked to "review jobs", "show job matches", "approve/reject jobs",
+  "find me jobs", "run job search", "look for DevOps jobs", or similar.
+  The scraper runs automatically at 8:07am daily. This skill is for reviewing
+  and managing those results interactively.
+version: 2.0.0
+allowed-tools: Bash, Read
+---
+
+Job search DB: `~/job-search/data/jobs.db`. Dashboard: http://localhost:3131
+
+## Step 1: Stats
+
+!`cd ~/job-search && node -e "
+const db = require('better-sqlite3')('data/jobs.db');
+console.log(JSON.stringify({
+  total:     db.prepare('SELECT COUNT(*) c FROM jobs').get().c,
+  pending:   db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE status='pending'\").get().c,
+  highScore: db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE status='pending' AND score >= 7\").get().c,
+  applied:   db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE status='applied'\").get().c,
+  responded: db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE status='responded'\").get().c,
+  rejected:  db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE stage='rejected'\").get().c,
+  archived:  db.prepare(\"SELECT COUNT(*) c FROM jobs WHERE status='archived' AND (stage IS NULL OR stage != 'rejected')\").get().c,
+  lastRun:   db.prepare(\"SELECT MAX(created_at) c FROM jobs\").get().c,
+}, null, 2));
+"`
+
+Show stats clearly. Note how many high-scoring (7+) pending jobs await review.
+
+## Step 2: Load pending jobs
+
+!`cd ~/job-search && node -e "
+const db = require('better-sqlite3')('data/jobs.db');
+const jobs = db.prepare(\"SELECT id, title, company, platform, location, url, score, reasoning FROM jobs WHERE status='pending' AND score >= 7 ORDER BY score DESC LIMIT 20\").all();
+console.log(JSON.stringify(jobs, null, 2));
+"`
+
+## Step 3: Review one at a time
+
+Present each job and wait for a reply before moving on:
+
+```
+──────────────────────────────────────────
+[{score}/10] {title}
+{company} · {platform} · {location}
+{url}
+
+{reasoning}
+──────────────────────────────────────────
+approve / reject / skip / stop
+```
+
+After each reply, update the DB immediately using the correct schema:
+
+- `approve` / `yes` / `y` → set `status='applied'`:
+```bash
+cd ~/job-search && node -e "require('better-sqlite3')('data/jobs.db').prepare(\"UPDATE jobs SET status='applied', applied_at=COALESCE(applied_at, datetime('now')), updated_at=datetime('now') WHERE id=?\").run('JOB_ID');"
+```
+
+- `reject` / `no` / `n` → set `status='archived'`, `stage='rejected'`:
+```bash
+cd ~/job-search && node -e "require('better-sqlite3')('data/jobs.db').prepare(\"UPDATE jobs SET status='archived', stage='rejected', rejected_at=datetime('now'), updated_at=datetime('now') WHERE id=?\").run('JOB_ID');"
+```
+
+- `archive` / `a` → set `status='archived'` (no stage, hidden from queue):
+```bash
+cd ~/job-search && node -e "require('better-sqlite3')('data/jobs.db').prepare(\"UPDATE jobs SET status='archived', updated_at=datetime('now') WHERE id=?\").run('JOB_ID');"
+```
+- `skip` / `s` → stay `pending`, move on
+- `stop` → end loop, go to Step 4
+
+Batch commands like "reject all below 6" or "approve all 9s" are fine. Handle with a single UPDATE.
+
+## Step 4: Summary
+
+Show: approved / rejected this session, pending remaining, dashboard link http://localhost:3131
+
+---
+
+## Other things the user might ask
+
+**"run the pipeline now"** — the Go engine owns scraping/scoring/maintenance, so
+kick a scrape via the same trigger the dashboard "Scrape now" button uses:
+```bash
+curl -fsS -X POST http://localhost:${DASHBOARD_PORT:-3131}/api/scrape-now && echo
+```
+Scoring and maintenance then run on the go-backend schedule (and on boot via
+`SCORE_ON_START`). If the dashboard is not running, start the stack with
+`docker compose up -d`.
+
+**"what have I applied to":**
+```bash
+cd ~/job-search && node -e "const db=require('better-sqlite3')('data/jobs.db');console.log(JSON.stringify(db.prepare(\"SELECT title,company,url,status,updated_at FROM jobs WHERE status IN ('applied','responded') ORDER BY updated_at DESC\").all(),null,2));"
+```
+
+**"mark Company as responded":** find job by company, update status to `responded`.
+
+**"show archived" / "what did I archive":**
+```bash
+cd ~/job-search && node -e "const db=require('better-sqlite3')('data/jobs.db');console.log(JSON.stringify(db.prepare(\"SELECT title,company,url,score,updated_at FROM jobs WHERE status='archived' ORDER BY updated_at DESC\").all(),null,2));"
+```
+
+**"unarchive Company":** find job by company, update status back to `pending`.
+
+**"reject all below 6":**
+```bash
+cd ~/job-search && node -e "const r=require('better-sqlite3')('data/jobs.db').prepare(\"UPDATE jobs SET status='archived', stage='rejected', rejected_at=datetime('now'), updated_at=datetime('now') WHERE status='pending' AND score < 6\").run();console.log('rejected '+r.changes);"
+```

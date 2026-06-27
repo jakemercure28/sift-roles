@@ -1,0 +1,5 @@
+# Custom self-hosted runner labels used by deploy.yml. Registering them here
+# stops actionlint flagging `runs-on: [self-hosted, thinkpad]` as unknown.
+self-hosted-runner:
+  labels:
+    - thinkpad

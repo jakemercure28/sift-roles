@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Platform Engineer",
+    "company": "oscorp",
+    "description": "Compensation: Tier 3\n\nBuild & scale the platform",
+    "direct_apply_url": "https://jobs.ashbyhq.com/oscorp/1001",
+    "ats_platform_name": "Ashby",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2026-04-20T00:00:00Z"
+  },
+  {
+    "title": "SRE",
+    "company": "oscorp",
+    "description": "Reliability and on-call",
+    "direct_apply_url": "https://jobs.ashbyhq.com/oscorp/1002",
+    "ats_platform_name": "Ashby",
+    "scraped_timestamp": "",
+    "location": "London",
+    "posted_at": ""
+  },
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "Wayne Enterprises",
+    "description": "Compensation: $180k - $220k\n\nRun the platform at scale.",
+    "direct_apply_url": "https://jobs.ashbyhq.com/wayne/0001",
+    "ats_platform_name": "Ashby",
+    "scraped_timestamp": "",
+    "location": "Gotham, NJ, USA | Remote - US | Metropolis",
+    "posted_at": "2026-05-10T00:00:00Z"
+  }
+]

@@ -1,0 +1,58 @@
+# Secrets
+.env
+*.env
+.env.*
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Go
+/server
+/cmd/server/server
+*.test
+/coverage.out
+
+# Python
+.venv/
+__pycache__/
+
+# SQLite
+jobs.db
+*.db-shm
+*.db-wal
+
+# Generated files
+*.pdf
+jobs.json
+transcript.md
+public/bookmarklet.js
+scraper-service/dist/
+
+# Personal data directory (copy data.example to data to set up)
+/.context/
+/data/
+
+# Local backups (from scripts/backup.sh)
+/backups/
+
+# Logs
+logs/
+
+# Cache files (company targeting, ATS slug health) are per-user
+market-research-cache.json
+slug-health.json
+jd-health.json
+slug-health-dismissed.json
+
+# Claude user-level skill overrides stay local (may contain personal paths)
+.claude/skills/
+# Claude local settings stay local (may contain personal tool permissions)
+.claude/settings.local.json
+# Claude transient git worktrees (per-session scratch checkouts) stay local
+.claude/worktrees/
+
+.aider*
+backups/

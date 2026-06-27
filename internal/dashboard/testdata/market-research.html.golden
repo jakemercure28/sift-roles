@@ -1,0 +1,536 @@
+
+<div class="market-report">
+  
+  <section class="report-band report-band-intro">
+  <div class="report-masthead">
+    <p class="report-meta"><span class="report-meta-num">4</span> current roles &middot; <span class="report-meta-num">5</span> all-time &middot; analyzed 4 live JDs &middot; updated Jan 2</p>
+    <div class="report-masthead-actions">
+      <form method="POST" action="/market-research" class="report-rerun-form" onsubmit="return mrRunSubmit(this)">
+        <button type="submit" class="btn btn-sm btn-archive">Re-run analysis</button>
+      </form>
+    </div>
+  </div>
+  </section>
+  <section class="report-band"><div class="stat-strip">
+    <div class="stat-item">
+      <div class="stat-num">4</div>
+      <div class="stat-label">Current roles</div>
+      
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">50%</div>
+      <div class="stat-label">Accessible at 4 YOE</div>
+      <div class="stat-sub">2 of 4 roles</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">25%</div>
+      <div class="stat-label">Remote share</div>
+      
+    </div>
+    <div class="stat-item stat-item-wide">
+      <div class="stat-num">Kubernetes</div>
+      <div class="stat-label">Top required skill</div>
+      
+    </div></div></section>
+  <section class="report-band">
+  <div class="market-scope-tabs">
+    <h2 class="analytics-title" style="margin:0">Market fit</h2>
+    <div class="tracker-period-btns" role="tablist" aria-label="Market view">
+      <button type="button" class="tracker-period-btn active" id="market-tab-current" data-market-view="current" onclick="setMarketView('current')" role="tab" aria-selected="true">Current Market</button>
+      <button type="button" class="tracker-period-btn" id="market-tab-all-time" data-market-view="all-time" onclick="setMarketView('all-time')" role="tab" aria-selected="false">All Time</button>
+    </div>
+  </div>
+  <script>
+  function setMarketView(view) {
+    var ids = ['current', 'all-time'];
+    ids.forEach(function(id) {
+      var panel = document.getElementById('market-view-' + id);
+      var tab = document.getElementById('market-tab-' + id);
+      var active = id === view;
+      if (panel) panel.style.display = active ? '' : 'none';
+      if (tab) {
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      }
+    });
+  }
+  </script>
+  <div id="market-view-current" class="market-view-panel" style="">
+  <div class="market-research-grid">
+    <div class="analytics-section market-section">
+      <h3 class="report-subhead">Current market — seniority</h3>
+      <p class="analytics-hint">4 live open roles by seniority.</p>
+      <p class="report-callout">2/4 realistic at 4 YOE (50%). Most of the rest ask 5+ years.</p>
+      <div style="margin-top:16px">
+        
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Junior / Entry<br><span style="font-size:11px;color:var(--text-muted)">0–2 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:0%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          
+        </div>
+        <span style="position:absolute;left:2%;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">0</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">0%</div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Mid-Level<br><span style="font-size:11px;color:var(--text-muted)">3–4 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative;box-shadow:0 0 0 1px var(--accent)">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">2</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">50%<span style="color:var(--accent);font-size:11px;margin-left:6px;font-weight:700">◀ you</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Senior<br><span style="font-size:11px;color:var(--text-muted)">5–7 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:50%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">1</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">25%</div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Staff / Lead+<br><span style="font-size:11px;color:var(--text-muted)">8+ yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:50%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">1</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">25%</div>
+    </div>
+      </div>
+    </div>
+    
+  <div class="analytics-section market-section">
+    <h3 class="report-subhead">Experience requirements</h3>
+    <p class="analytics-hint">4 current JDs with stated years.</p>
+    <div style="margin-top:10px">
+      
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--accent);text-align:right;font-weight:700;font-family:var(--font-mono)">3+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--accent);text-align:right;font-weight:700;font-family:var(--font-mono)">4+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-secondary);text-align:right;font-weight:400;font-family:var(--font-mono)">5+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-secondary);text-align:right;font-weight:400;font-family:var(--font-mono)">8+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    </div>
+  </div>
+  </div>
+  </div>
+  <div id="market-view-all-time" class="market-view-panel" style="display:none">
+  <div class="market-research-grid">
+    <div class="analytics-section market-section">
+      <h3 class="report-subhead">All-time — seniority</h3>
+      <p class="analytics-hint">5 all-time seen roles by seniority.</p>
+      <p class="report-callout">3/5 realistic at 4 YOE (60%). Most of the rest ask 5+ years.</p>
+      <div style="margin-top:16px">
+        
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Junior / Entry<br><span style="font-size:11px;color:var(--text-muted)">0–2 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:50%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">1</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">20%</div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Mid-Level<br><span style="font-size:11px;color:var(--text-muted)">3–4 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative;box-shadow:0 0 0 1px var(--accent)">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">2</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">40%<span style="color:var(--accent);font-size:11px;margin-left:6px;font-weight:700">◀ you</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Senior<br><span style="font-size:11px;color:var(--text-muted)">5–7 yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:50%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">1</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">20%</div>
+    </div>
+    <div style="display:grid;grid-template-columns:140px 1fr 110px;align-items:center;gap:12px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap">
+        Staff / Lead+<br><span style="font-size:11px;color:var(--text-muted)">8+ yrs</span>
+      </div>
+      <div style="height:28px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden;position:relative">
+        <div style="height:100%;width:50%;background:var(--text-muted);border-radius:4px;min-width:4px;display:flex;align-items:center;padding-left:8px">
+          <span style="font-size:11px;color:var(--inverse);font-weight:600;font-family:var(--font-mono)">1</span>
+        </div>
+        
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">20%</div>
+    </div>
+      </div>
+    </div>
+    
+  <div class="analytics-section market-section">
+    <h3 class="report-subhead">Experience requirements</h3>
+    <p class="analytics-hint">5 all-time JDs with stated years.</p>
+    <div style="margin-top:10px">
+      
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-secondary);text-align:right;font-weight:400;font-family:var(--font-mono)">1+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--accent);text-align:right;font-weight:700;font-family:var(--font-mono)">3+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--accent);text-align:right;font-weight:700;font-family:var(--font-mono)">4+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--accent);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-secondary);text-align:right;font-weight:400;font-family:var(--font-mono)">5+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    <div style="display:grid;grid-template-columns:60px 1fr 40px;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-secondary);text-align:right;font-weight:400;font-family:var(--font-mono)">8+ yrs</div>
+      <div style="height:18px;background:rgba(var(--tint-rgb),0.06);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:3px;min-width:3px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-primary);font-family:var(--font-mono)">1</div>
+    </div>
+    </div>
+  </div>
+  </div>
+  </div></section>
+  <section class="report-band">
+  <h2 class="analytics-title">Skills</h2>
+  <p class="analytics-hint">JD demand and resume gaps.</p>
+
+  <div class="skills-two-col">
+    <div class="skills-col">
+      <h3 class="report-subhead">Gaps</h3>
+      <table class="calibration-table report-table">
+        <thead><tr><th>Skill</th><th>% of JDs</th><th>Note</th></tr></thead>
+        <tbody>
+    <tr>
+      <td class="gap-skill">Kubernetes</td>
+      <td class="num">100%</td>
+      <td class="note">4 of 4 JDs; weak on resume.</td>
+    </tr>
+    <tr>
+      <td class="gap-skill">Terraform</td>
+      <td class="num">75%</td>
+      <td class="note">3 of 4 JDs; weak on resume.</td>
+    </tr>
+    <tr>
+      <td class="gap-skill">GPU scheduling</td>
+      <td class="num">25%</td>
+      <td class="note">1 of 4 JD; weak on resume.</td>
+    </tr></tbody>
+      </table>
+    </div>
+    <div class="skills-col">
+      <h3 class="report-subhead">Strengths</h3>
+      <table class="calibration-table report-table">
+        <thead><tr><th>Skill</th><th>JD Count</th></tr></thead>
+        <tbody>
+    <tr>
+      <td class="strength-skill">AWS</td>
+      <td class="num">2</td>
+    </tr>
+    <tr>
+      <td class="strength-skill">CI/CD</td>
+      <td class="num">2</td>
+    </tr>
+    <tr>
+      <td class="strength-skill">Observability</td>
+      <td class="num">2</td>
+    </tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="skills-demanded">
+    <h3 class="report-subhead">Top skills</h3>
+    <div class="skills-bar-list">
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Kubernetes"><span class="skill-name">Kubernetes</span><span class="skill-tag skill-tag-gap">gap</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:100%"></div></div>
+      <div class="skill-bar-count">4 <span class="skill-bar-pct">(100%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Terraform"><span class="skill-name">Terraform</span><span class="skill-tag skill-tag-gap">gap</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:75%"></div></div>
+      <div class="skill-bar-count">3 <span class="skill-bar-pct">(75%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="AWS"><span class="skill-name">AWS</span><span class="skill-tag skill-tag-strong">strong</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:50%"></div></div>
+      <div class="skill-bar-count">2 <span class="skill-bar-pct">(50%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Observability"><span class="skill-name">Observability</span><span class="skill-tag skill-tag-strong">strong</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:50%"></div></div>
+      <div class="skill-bar-count">2 <span class="skill-bar-pct">(50%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="CI/CD"><span class="skill-name">CI/CD</span><span class="skill-tag skill-tag-strong">strong</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:50%"></div></div>
+      <div class="skill-bar-count">2 <span class="skill-bar-pct">(50%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="GPU scheduling"><span class="skill-name">GPU scheduling</span><span class="skill-tag skill-tag-gap">gap</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Inference serving"><span class="skill-name">Inference serving</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Incident response"><span class="skill-name">Incident response</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Linux"><span class="skill-name">Linux</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div>
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="Docker"><span class="skill-name">Docker</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div></div>
+    <details class="skills-more"><summary>Show all 11 skills</summary><div class="skills-bar-list">
+    <div class="skill-bar-row">
+      <div class="skill-bar-label" title="SLOs"><span class="skill-name">SLOs</span></div>
+      <div class="skill-bar-track"><div class="skill-bar-fill" style="width:25%"></div></div>
+      <div class="skill-bar-count">1 <span class="skill-bar-pct">(25%)</span></div>
+    </div></div></details>
+  </div></section>
+  <section class="report-band">
+<div class="analytics-section market-section tracker-section">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
+    <h2 class="analytics-title" style="margin-bottom:0">Posting trend</h2>
+    <div class="tracker-period-btns">
+      <button class="tracker-period-btn" data-period="12w">12W</button>
+      <button class="tracker-period-btn active" data-period="26w">26W</button>
+      <button class="tracker-period-btn" data-period="52w">52W</button>
+      <button class="tracker-period-btn" data-period="all">All</button>
+    </div>
+  </div>
+  <p class="analytics-hint" style="margin-bottom:16px">New roles per week.</p>
+  <div class="tracker-chart-wrap">
+    <canvas id="newRolesChart"></canvas>
+    <div id="newRolesEmpty" class="tracker-unavailable" style="display:none">Trend unavailable until more dated roles are collected.</div>
+  </div>
+</div>
+<script>
+(function() {
+  var newRolesChart = null;
+  var currentPeriod = '26w';
+
+  function loadNewRoles(period) {
+    window.loadDashboardChart(function() {
+      fetch('/api/market-activity?period=' + period)
+        .then(function(r){return r.json();})
+        .then(function(rows) {
+        var empty = document.getElementById('newRolesEmpty');
+        var canvas = document.getElementById('newRolesChart');
+        var wrap = canvas.parentElement;
+        var sum = (rows || []).reduce(function(a, r){ return a + (r.count || 0); }, 0);
+        if (!rows || rows.length === 0 || sum === 0) {
+          canvas.style.display = 'none';
+          empty.style.display = 'block';
+          wrap.classList.add('tracker-chart-collapsed');
+          return;
+        }
+        canvas.style.display = 'block';
+        empty.style.display = 'none';
+        wrap.classList.remove('tracker-chart-collapsed');
+        var labels = rows.map(function(r){return r.label;});
+        var data = rows.map(function(r){return r.count;});
+        var dataset = {
+          label: 'New roles',
+          data: data,
+          backgroundColor: 'rgba(120, 120, 120, 0.45)',
+          borderColor: 'rgba(120, 120, 120, 0.7)',
+          borderWidth: 1,
+          borderRadius: 2,
+          maxBarThickness: 26,
+        };
+        if (newRolesChart) {
+          newRolesChart.data.labels = labels;
+          newRolesChart.data.datasets = [dataset];
+          newRolesChart.update();
+        } else {
+          var ctx = canvas.getContext('2d');
+          newRolesChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: [dataset] },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  backgroundColor: 'rgba(20,20,20,0.95)',
+                  borderColor: 'rgba(128,128,128,0.25)',
+                  borderWidth: 1,
+                  titleColor: '#f0f0f0',
+                  bodyColor: '#cccccc',
+                  callbacks: {
+                    title: function(items){return 'Week of ' + items[0].label;},
+                    label: function(item){return item.parsed.y + ' new role' + (item.parsed.y === 1 ? '' : 's');}
+                  }
+                }
+              },
+              scales: {
+                x: { ticks: { color: '#8A8A8A', maxTicksLimit: 12, maxRotation: 0 }, grid: { display: false } },
+                y: { beginAtZero: true, ticks: { color: '#8A8A8A', precision: 0 }, grid: { color: 'rgba(128,128,128,0.12)' } }
+              }
+            }
+          });
+        }
+      })
+      .catch(function(){});
+    });
+  }
+
+  document.querySelectorAll('.tracker-period-btn[data-period]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tracker-period-btn[data-period]').forEach(function(b){b.classList.remove('active');});
+      btn.classList.add('active');
+      currentPeriod = btn.dataset.period;
+      loadNewRoles(currentPeriod);
+    });
+  });
+
+  loadNewRoles(currentPeriod);
+})();
+</script>
+</section>
+  <section class="report-band">
+  <h2 class="analytics-title">Location</h2>
+  <p class="analytics-hint"><span style="font-family:var(--font-mono)">4</span> current roles by location.</p>
+  <p class="location-note">Remote 25%; in-person 25%. Austin leads.</p>
+  <div class="location-two-col">
+    <div>
+    <div style="display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right">Remote</div>
+      <div style="height:22px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right">Hybrid</div>
+      <div style="height:22px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right">In-Person</div>
+      <div style="height:22px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:120px 1fr 100px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right">Not Specified</div>
+      <div style="height:22px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div></div>
+    
+    <div class="location-two-col-side">
+      <h3 class="report-subhead">Top metros <span class="report-subhead-note">grouped by standard metro</span></h3>
+      <div>
+    <div style="display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Austin">Austin</div>
+      <div style="height:20px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="New York">New York</div>
+      <div style="height:20px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Seattle">Seattle</div>
+      <div style="height:20px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:150px 1fr 90px;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="font-size:13px;color:var(--text-primary);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="SF Bay Area">SF Bay Area</div>
+      <div style="height:20px;background:rgba(var(--tint-rgb),0.06);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:100%;background:var(--text-muted);border-radius:4px;min-width:4px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-primary);font-weight:600;font-family:var(--font-mono)">1 <span style="font-weight:400;color:var(--text-muted)">(25%)</span></div>
+    </div></div>
+      
+    </div>
+  </div></section>
+</div>

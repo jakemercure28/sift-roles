@@ -1,0 +1,44 @@
+{
+  "devops": {
+    "jobs": [
+      {
+        "id": 1,
+        "title": "DevOps Engineer",
+        "url": "https://example.com/job/1",
+        "company_name": "Acme",
+        "description": "<p>Operate</p>",
+        "candidate_required_location": "USA Only"
+      }
+    ]
+  },
+  "platform engineer": {
+    "jobs": [
+      {
+        "id": 2,
+        "title": "Platform Engineer",
+        "url": "https://example.com/job/2",
+        "company_name": "Globex",
+        "description": "Build"
+      }
+    ]
+  },
+  "sre": {
+    "jobs": [
+      {
+        "id": 1,
+        "title": "DevOps Engineer",
+        "url": "https://example.com/job/1",
+        "company_name": "Acme",
+        "description": "<p>Operate</p>",
+        "candidate_required_location": "USA Only"
+      },
+      {
+        "id": 3,
+        "title": "SRE",
+        "url": "https://example.com/job/3",
+        "company_name": "Initech",
+        "description": "Reliability"
+      }
+    ]
+  }
+}

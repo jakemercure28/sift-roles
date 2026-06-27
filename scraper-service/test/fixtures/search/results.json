@@ -1,0 +1,46 @@
+[
+  {
+    "text": "Senior DevOps Engineer",
+    "matched": true
+  },
+  {
+    "text": "Platform Engineer",
+    "matched": true
+  },
+  {
+    "text": "platformengineer",
+    "matched": false
+  },
+  {
+    "text": "SRE Lead",
+    "matched": true
+  },
+  {
+    "text": "syntax wizard",
+    "matched": false
+  },
+  {
+    "text": "VP of Sales",
+    "matched": true
+  },
+  {
+    "text": "Developer (no match)",
+    "matched": false
+  },
+  {
+    "text": "Tax Associate",
+    "matched": true
+  },
+  {
+    "text": "Investments Manager",
+    "matched": true
+  },
+  {
+    "text": "",
+    "matched": false
+  },
+  {
+    "text": "staff sre / platform",
+    "matched": true
+  }
+]

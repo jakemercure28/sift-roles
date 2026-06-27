@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "Acme Inc",
+    "description": "Acme is great. Run & scale the platform",
+    "direct_apply_url": "https://ats.rippling.com/acme/jobs/u1",
+    "ats_platform_name": "Rippling",
+    "scraped_timestamp": "",
+    "location": "Seattle, WA | Remote - US",
+    "posted_at": ""
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "Acme Inc",
+    "description": "Build the platform",
+    "direct_apply_url": "https://ats.rippling.com/acme/jobs/u3",
+    "ats_platform_name": "Rippling",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": ""
+  }
+]

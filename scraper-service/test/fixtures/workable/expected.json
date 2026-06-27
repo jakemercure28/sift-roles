@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Platform Engineer",
+    "company": "Acme Inc",
+    "description": "Build the platform",
+    "direct_apply_url": "https://apply.workable.com/acme/j/GHI789",
+    "ats_platform_name": "Workable",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": ""
+  },
+  {
+    "title": "SRE",
+    "company": "Globex LLC",
+    "description": "Reliability — on-call",
+    "direct_apply_url": "https://apply.workable.com/j/777",
+    "ats_platform_name": "Workable",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2026-05-02"
+  },
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "Acme Inc",
+    "description": "Run & scale the platform",
+    "direct_apply_url": "https://apply.workable.com/j/ABC123",
+    "ats_platform_name": "Workable",
+    "scraped_timestamp": "",
+    "location": "Berlin, Germany",
+    "posted_at": "2026-05-01"
+  }
+]

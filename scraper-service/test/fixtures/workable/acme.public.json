@@ -1,0 +1,24 @@
+{
+  "name": "Acme Inc",
+  "jobs": [
+    {
+      "title": "Senior DevOps Engineer",
+      "shortcode": "ABC123",
+      "description": "<p>Run &amp; scale the platform</p>",
+      "location": { "city": "Berlin", "country": "Germany" },
+      "created_at": "2026-05-01"
+    },
+    {
+      "title": "Office Manager",
+      "shortcode": "DEF456",
+      "description": "Front desk"
+    },
+    {
+      "title": "Platform Engineer",
+      "shortcode": "GHI789",
+      "url": "https://apply.workable.com/acme/j/GHI789",
+      "remote": true,
+      "description": "Build the platform"
+    }
+  ]
+}

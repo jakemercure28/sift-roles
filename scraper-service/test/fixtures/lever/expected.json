@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Platform Engineer",
+    "company": "stark",
+    "description": "Build — the platform",
+    "direct_apply_url": "https://jobs.lever.co/stark/ghi-789",
+    "ats_platform_name": "Lever",
+    "scraped_timestamp": "",
+    "location": "San Francisco",
+    "posted_at": ""
+  },
+  {
+    "title": "SRE",
+    "company": "stark",
+    "description": "Reliability and on-call",
+    "direct_apply_url": "https://jobs.lever.co/stark/jkl-000",
+    "ats_platform_name": "Lever",
+    "scraped_timestamp": "",
+    "location": "",
+    "posted_at": ""
+  },
+  {
+    "title": "Staff DevOps Engineer",
+    "company": "umbrella",
+    "description": "We run platforms at scale.\n\nResponsibilities:\n\nOwn CI/CD On-call\n\nA section with no header\n\nNice to have:\n\nApply & join us — today",
+    "direct_apply_url": "https://jobs.lever.co/umbrella/abc-123",
+    "ats_platform_name": "Lever",
+    "scraped_timestamp": "",
+    "location": "Remote - US | Remote - EU",
+    "posted_at": "2024-04-24"
+  }
+]

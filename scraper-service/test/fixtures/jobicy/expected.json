@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Platform Engineer",
+    "company": "Globex",
+    "description": "Build the platform",
+    "direct_apply_url": "https://example.com/job/2",
+    "ats_platform_name": "Remotive",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2026-05-02"
+  },
+  {
+    "title": "DevOps Engineer",
+    "company": "Acme",
+    "description": "Operate & automate",
+    "direct_apply_url": "https://jobs.lever.co/acme/abc-123",
+    "ats_platform_name": "Lever",
+    "scraped_timestamp": "",
+    "location": "USA Only",
+    "posted_at": "2026-05-01"
+  }
+]

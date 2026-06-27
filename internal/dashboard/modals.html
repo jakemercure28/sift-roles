@@ -1,0 +1,140 @@
+
+
+<!-- Onboarding wizard -->
+<div class="modal-overlay" id="onboarding-wizard">
+  <div class="modal wizard-modal" style="max-width:580px;max-height:90vh;overflow-y:auto">
+
+    <!-- Resume upload (only step) -->
+    <div class="wizard-step active" id="wstep-2">
+      <h2>Drop in your resume to get started</h2>
+      <p class="modal-sub">We'll handle the rest. PDF, plain text, or markdown all work.</p>
+      <input type="file" id="wizard-resume-file" accept=".pdf,.txt,.md" style="display:none" onchange="wizardResumeFileChanged()" />
+      <div id="wizard-resume-upload-area" style="display:flex;align-items:center;gap:12px;margin:16px 0 4px">
+        <button class="btn" style="background:var(--slate);color:var(--text-primary);white-space:nowrap" onclick="document.getElementById('wizard-resume-file').click()">Choose file</button>
+        <span id="wizard-resume-filename" style="font-size:13px;color:var(--text-muted)">No file chosen</span>
+      </div>
+      <div id="wizard-resume-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:12px"></div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" id="wizard-resume-save-btn" style="background:#000000;color:white" onclick="wizardSaveResume()">Get started</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Settings modal -->
+<div class="modal-overlay" id="settings-modal" onclick="settingsOverlayClick(event)">
+  <div class="modal wizard-modal" style="width:660px;max-width:94vw;height:82vh;max-height:760px;display:flex;flex-direction:column">
+    <h2>Settings</h2>
+    <p class="modal-sub">Change your setup without editing files or restarting. Worker knobs apply on the next refresh.</p>
+    <div class="modal-tabs" id="settings-tabs" style="flex:none">
+      <button class="modal-tab active" data-tab="resume" onclick="settingsShowTab('resume')">Resume</button>
+      <button class="modal-tab" data-tab="profile" onclick="settingsShowTab('profile')">Profile</button>
+      <button class="modal-tab" data-tab="companies" onclick="settingsShowTab('companies')">Targets</button>
+      <button class="modal-tab" data-tab="integrations" onclick="settingsShowTab('integrations')">Integrations</button>
+    </div>
+
+    <!-- Scrolling content area: keeps the modal a fixed height so it doesn't
+         jump when switching tabs; only this region scrolls. -->
+    <div class="settings-body" style="flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;min-height:0;margin-top:4px">
+
+    <!-- Resume -->
+    <div class="settings-panel active" data-panel="resume">
+      <p class="modal-sub">Replace your resume. PDF, plain text, or markdown. PDF extraction uses one Gemini call.</p>
+      <input type="file" id="settings-resume-file" accept=".pdf,.txt,.md" style="display:none" onchange="settingsResumeFileChanged()" />
+      <div style="display:flex;align-items:center;gap:12px;margin:8px 0">
+        <button class="btn" style="background:var(--slate);color:var(--text-primary);white-space:nowrap" onclick="document.getElementById('settings-resume-file').click()">Choose file</button>
+        <span id="settings-resume-filename" style="font-size:13px;color:var(--text-muted)">No file chosen</span>
+      </div>
+      <div id="settings-resume-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
+      <div class="modal-actions" style="margin-top:12px">
+        <button class="btn" id="settings-resume-save-btn" style="background:#000000;color:white" onclick="settingsSaveResume()">Upload resume</button>
+      </div>
+    </div>
+
+    <!-- Profile & preferences -->
+    <div class="settings-panel" data-panel="profile" style="display:none">
+      <p class="modal-sub">What the scorer looks for. Matching jobs rank higher.</p>
+      <div id="settings-profile-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+      <div class="wizard-field-group">
+        <label for="settings-titles">Target titles <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-titles" rows="5" placeholder="Senior Backend Engineer&#10;Platform Engineer"></textarea>
+
+        <label for="settings-stack">Tech stack <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-stack" rows="5" placeholder="Go&#10;Kubernetes&#10;Postgres"></textarea>
+
+        <label for="settings-salary">Base salary floor <span class="wizard-field-hint">(numbers only, optional)</span></label>
+        <input id="settings-salary" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="180000" />
+
+        <label for="settings-location">Location preference <span class="wizard-field-hint">(optional)</span></label>
+        <input id="settings-location" type="text" placeholder="Remote or Austin, TX" style="margin-bottom:0" />
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" style="background:var(--slate);color:#fff" onclick="settingsExtractProfile()" id="settings-extract-btn">Re-extract from resume</button>
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveProfile()" id="settings-profile-save-btn">Save profile</button>
+      </div>
+    </div>
+
+    <!-- Target companies / search terms -->
+    <div class="settings-panel" data-panel="companies" style="display:none">
+      <p class="modal-sub">Keywords that cast the scrape net over job titles. Broader = more candidates to score.</p>
+      <div id="settings-companies-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+      <div class="wizard-field-group">
+        <label for="settings-max-age">Job freshness <span class="wizard-field-hint">(only show jobs posted within this many days)</span></label>
+        <input id="settings-max-age" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="20" />
+        <div class="wizard-field-hint" style="margin:2px 0 8px">Default: 20 days. Lower = fresher but fewer jobs.</div>
+
+        <label for="settings-terms">Search terms <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-terms" rows="8" placeholder="backend engineer&#10;platform&#10;devops"></textarea>
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveCompanies()" id="settings-companies-save-btn">Save targets</button>
+      </div>
+    </div>
+
+    <!-- Integrations (Gmail rejection-email sync) -->
+    <div class="settings-panel" data-panel="integrations" style="display:none">
+      <p class="modal-sub">Gmail rejection email sync. Rejection emails automatically move the matching application to Rejected. Use a Google app password, not your account password.</p>
+      <div id="settings-rejection-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin:2px 0 10px">Checking sync status…</div>
+      <div id="settings-integrations-fields" style="margin-top:4px"></div>
+      <div id="settings-integrations-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin:8px 0"></div>
+      <div class="modal-actions" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveApp()" id="settings-integrations-save-btn">Save integrations</button>
+        <button class="btn" style="background:var(--slate);color:var(--text-primary)" onclick="settingsRejectionSyncNow()" id="settings-sync-now-btn">Sync now</button>
+      </div>
+    </div>
+    </div><!-- /.settings-body -->
+
+    <div class="modal-actions" style="flex:none;margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+      <!--SIGN-OUT--><button class="btn" style="background:var(--slate);color:#fff" onclick="closeSettings()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Job description modal -->
+<div class="modal-overlay" id="jd-modal">
+  <div class="modal" style="max-width:720px">
+    <h2 id="jd-modal-title">Job Description</h2>
+    <div class="modal-sub" id="jd-modal-sub"></div>
+    <div id="jd-modal-body" style="white-space:pre-wrap;font-size:13px;line-height:1.6;max-height:60vh;overflow-y:auto;margin-top:12px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary)"></div>
+    <div class="modal-actions">
+      <button class="btn" style="background:var(--slate);color:#fff" onclick="document.getElementById('jd-modal').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Company notes modal -->
+<div class="modal-overlay" id="company-notes-modal">
+  <div class="modal">
+    <h2>Company Notes</h2>
+    <div class="modal-sub" id="company-notes-sub"></div>
+    <label for="company-tags-input">Tags <span style="font-size:11px;color:#8A8A8A">(comma-separated, e.g. "recently funded, network connection")</span></label>
+    <input id="company-tags-input" type="text" placeholder="e.g. recently funded, network connection" autocomplete="off" />
+    <label for="company-notes-input" style="margin-top:12px">Notes</label>
+    <textarea id="company-notes-input" rows="4" placeholder="Freeform notes about this company..." style="width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical"></textarea>
+    <div class="modal-actions">
+      <button class="btn" style="background:#565656;color:#8A8A8A" onclick="closeCompanyNotes()">Cancel</button>
+      <button class="btn" style="background:#000000;color:white" onclick="saveCompanyNotes()">Save</button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,278 @@
+</style>
+<script>
+// Apply the saved theme before first paint so there is no flash.
+(function() {
+  try {
+    var saved = localStorage.getItem('dashboard-theme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  } catch (e) {}
+})();
+</script>
+</head>
+<body class="report-problem-page">
+
+<header class="rp-header">
+  <div class="rp-shell">
+    <a href="/" class="rp-back">&larr; Back to dashboard</a>
+    <div class="rp-header-copy">
+      <div class="rp-label-eyebrow">Report a problem</div>
+      <h1>Report Problem</h1>
+      <p>Use this when the app shows wrong data, breaks, or behaves in a confusing way. This opens a prefilled GitHub issue that you can review before submitting.</p>
+    </div>
+  </div>
+</header>
+
+<main class="rp-shell rp-main">
+  <form id="rp-form" class="rp-form">
+
+    <section class="rp-section">
+      <div class="rp-label-eyebrow">Problem type</div>
+      <div class="rp-radios">
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="bug" data-label="Bug" checked>
+        <span>Bug</span>
+      </label>
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="confusing-data" data-label="Confusing data">
+        <span>Confusing data</span>
+      </label>
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="scoring" data-label="Scoring issue">
+        <span>Scoring issue</span>
+      </label>
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="setup" data-label="Import/setup issue">
+        <span>Import/setup issue</span>
+      </label>
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="ui" data-label="UI issue">
+        <span>UI issue</span>
+      </label>
+      <label class="rp-radio">
+        <input type="radio" name="rp-type" value="other" data-label="Other">
+        <span>Other</span>
+      </label>
+      </div>
+    </section>
+
+    <section class="rp-section">
+      
+      <div class="rp-field">
+        <label class="rp-label" for="rp-what">What happened?</label>
+        <textarea id="rp-what" class="rp-textarea" rows="3" placeholder="What did you see go wrong?"></textarea>
+      </div>
+      
+      <div class="rp-field">
+        <label class="rp-label" for="rp-expected">What did you expect?</label>
+        <textarea id="rp-expected" class="rp-textarea" rows="3" placeholder="What should have happened instead?"></textarea>
+      </div>
+      
+      <div class="rp-field">
+        <label class="rp-label" for="rp-steps">Steps to reproduce</label>
+        <textarea id="rp-steps" class="rp-textarea" rows="3" placeholder="What did you click or do, in order?"></textarea>
+      </div>
+    </section>
+
+    <section class="rp-section">
+      <label class="rp-check">
+        <input type="checkbox" id="rp-diag" checked>
+        <span>Include safe diagnostic context</span>
+      </label>
+      <p class="rp-note">Adds the current page, URL, theme, browser, timestamp, and app version. No API keys, resume text, job descriptions, company notes, or secrets are included.</p>
+    </section>
+
+    <section class="rp-section">
+      <label class="rp-label" for="issue-preview">GitHub issue preview</label>
+      <p class="rp-note">Edit this before opening GitHub. Nothing is submitted automatically.</p>
+      <textarea id="issue-preview" class="rp-preview" rows="18" spellcheck="false"></textarea>
+    </section>
+
+    <div class="rp-actions">
+      <button type="button" id="rp-open" class="rp-btn rp-btn-primary">Open GitHub issue</button>
+      <button type="button" id="rp-copy" class="rp-btn">Copy issue text</button>
+      <span id="rp-status" class="rp-status" role="status" aria-live="polite"></span>
+    </div>
+
+  </form>
+</main>
+
+<script>
+function buildIssueTitle(typeLabel, what) {
+  const firstLine = String(what || '')
+    .split('\n')[0]
+    .trim();
+  const summary = firstLine || 'Problem report';
+  return '[' + (typeLabel || 'Other') + '] ' + summary;
+}
+function buildIssueBody(fields) {
+  fields = fields || {};
+  const what = String(fields.what || '').trim() || '_No description provided._';
+  const expected = String(fields.expected || '').trim() || '_Not specified._';
+  const steps = String(fields.steps || '').trim() || '_Not specified._';
+  const typeLabel = fields.typeLabel || 'Other';
+  const diagnostics =
+    String(fields.diagnostics || '').trim() ||
+    '_Diagnostic context not included._';
+  return [
+    '## What happened',
+    '',
+    what,
+    '',
+    '## What I expected',
+    '',
+    expected,
+    '',
+    '## Steps to reproduce',
+    '',
+    steps,
+    '',
+    '## Problem type',
+    '',
+    typeLabel,
+    '',
+    '## Safe diagnostic context',
+    '',
+    diagnostics,
+    '',
+    '## Notes',
+    '',
+    'Please do not include API keys, resume text, private job descriptions, or secrets.',
+    '',
+  ].join('\n');
+}
+function buildIssueUrl(title, body, baseUrl) {
+  const base =
+    baseUrl ||
+    'https://github.com/jakemercure28/job-search-automation/issues/new';
+  return (
+    base +
+    '?title=' +
+    encodeURIComponent(title) +
+    '&body=' +
+    encodeURIComponent(body)
+  );
+}
+
+var ISSUE_URL = "https://github.com/jakemercure28/job-search-automation/issues/new";
+var APP_VERSION = "1.0.0";
+var FILTER_LABELS = {
+  'all': 'Jobs', 'not-applied': 'Jobs', 'applied': 'Applications',
+  'interviewing': 'Interviews', 'offers': 'Offers', 'archived': 'Archive',
+  'rejected': 'Rejected', 'closed': 'Closed', 'ghosted': 'Ghosted',
+  'analytics': 'Analytics', 'activity-log': 'Event Log', 'market-research': 'Market Research'
+};
+
+function safeReferrerUrl(u) {
+  // Keep only known dashboard params and redact the free-text search query.
+  var keep = ['filter', 'sort', 'minScore', 'page'];
+  var out = new URLSearchParams();
+  keep.forEach(function (k) { if (u.searchParams.has(k)) out.set(k, u.searchParams.get(k)); });
+  if (u.searchParams.has('q')) out.set('q', '[search query omitted]');
+  var qs = out.toString();
+  return u.pathname + (qs ? '?' + qs : '');
+}
+
+function buildDiagnostics() {
+  var page = 'Unknown';
+  var urlInfo = 'Opened directly (no referrer)';
+  var auditNote = '';
+  try {
+    var ref = document.referrer || '';
+    if (ref) {
+      var u = new URL(ref);
+      if (u.origin === window.location.origin) {
+        var filter = u.searchParams.get('filter') || 'all';
+        page = FILTER_LABELS[filter] || 'Dashboard';
+        urlInfo = safeReferrerUrl(u);
+        if (filter === 'analytics') auditNote = '/api/analytics/audit exists for this page (not fetched here).';
+        if (filter === 'market-research') auditNote = '/api/market-research/audit exists for this page (not fetched here).';
+      } else {
+        page = 'External page';
+        urlInfo = u.origin + ' (external)';
+      }
+    }
+  } catch (e) {}
+  var theme = document.documentElement.getAttribute('data-theme')
+    || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  var lines = [
+    '- Page: ' + page,
+    '- URL: ' + urlInfo,
+    '- Theme: ' + theme,
+    '- Browser: ' + navigator.userAgent,
+    '- Timestamp: ' + new Date().toISOString(),
+    '- App version: ' + APP_VERSION,
+    '- API usage: not collected on this page'
+  ];
+  if (auditNote) lines.push('- Note: ' + auditNote);
+  return lines.join('\n');
+}
+
+(function () {
+  var form = document.getElementById('rp-form');
+  var whatEl = document.getElementById('rp-what');
+  var expectedEl = document.getElementById('rp-expected');
+  var stepsEl = document.getElementById('rp-steps');
+  var diagToggle = document.getElementById('rp-diag');
+  var preview = document.getElementById('issue-preview');
+  var openBtn = document.getElementById('rp-open');
+  var copyBtn = document.getElementById('rp-copy');
+  var status = document.getElementById('rp-status');
+  var previewDirty = false;
+
+  function selectedType() {
+    var checked = form.querySelector('input[name="rp-type"]:checked');
+    return checked ? { value: checked.value, label: checked.getAttribute('data-label') } : { value: 'other', label: 'Other' };
+  }
+
+  function currentBody() {
+    return buildIssueBody({
+      what: whatEl.value,
+      expected: expectedEl.value,
+      steps: stepsEl.value,
+      typeLabel: selectedType().label,
+      diagnostics: diagToggle.checked ? buildDiagnostics() : ''
+    });
+  }
+
+  function rebuild() {
+    if (previewDirty) return;
+    preview.value = currentBody();
+  }
+
+  function setStatus(msg) {
+    status.textContent = msg;
+    if (msg) setTimeout(function () { if (status.textContent === msg) status.textContent = ''; }, 2500);
+  }
+
+  form.addEventListener('input', function (e) {
+    if (e.target === preview) { previewDirty = true; return; }
+    rebuild();
+  });
+  form.addEventListener('change', rebuild);
+
+  openBtn.addEventListener('click', function () {
+    var title = buildIssueTitle(selectedType().label, whatEl.value);
+    var url = buildIssueUrl(title, preview.value, ISSUE_URL);
+    window.open(url, '_blank', 'noopener');
+  });
+
+  copyBtn.addEventListener('click', function () {
+    var text = preview.value;
+    function done() { setStatus('Copied issue text.'); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        preview.focus(); preview.select(); setStatus('Select all and copy.');
+      });
+    } else {
+      preview.focus(); preview.select(); setStatus('Select all and copy.');
+    }
+  });
+
+  rebuild();
+})();
+</script>
+
+</body>
+</html>

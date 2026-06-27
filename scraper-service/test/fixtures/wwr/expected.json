@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "Acme Corp",
+    "description": "Run & scale the platform",
+    "direct_apply_url": "https://weworkremotely.com/remote-jobs/acme-devops",
+    "ats_platform_name": "WeWorkRemotely",
+    "scraped_timestamp": "",
+    "location": "Worldwide",
+    "posted_at": "2026-05-01"
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "Globex",
+    "description": "Build the platform",
+    "direct_apply_url": "https://weworkremotely.com/remote-jobs/globex-platform",
+    "ats_platform_name": "WeWorkRemotely",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2026-05-02"
+  },
+  {
+    "title": "SRE",
+    "company": "Initech",
+    "description": "Reliability — on-call rotation",
+    "direct_apply_url": "https://weworkremotely.com/remote-jobs/initech-sre",
+    "ats_platform_name": "WeWorkRemotely",
+    "scraped_timestamp": "",
+    "location": "US Only",
+    "posted_at": "2026-05-03"
+  }
+]

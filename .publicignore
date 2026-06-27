@@ -1,0 +1,43 @@
+# .publicignore — paths removed from the public mirror (github.com/jakemercure28/sift-roles)
+#
+# Consumed by scripts/sync-to-public.sh. Each non-comment, non-blank line is a path
+# (file or directory, relative to repo root) deleted from the staged tree BEFORE it is
+# pushed public. The stage itself comes from `git archive HEAD`, so anything gitignored
+# (.env, data/, .context/, node_modules/, jobs.db, *-cache.json) is already absent — the
+# entries below are the tracked-but-private files plus belt-and-suspenders secret guards.
+#
+# This is a SOURCE-AVAILABLE core: the full application ships publicly (Postgres migrations,
+# internal/auth, multi-tenant code included). Only secrets, deploy/infra, and private ops are
+# stripped. Do NOT add application source here.
+
+# --- Secrets (defense in depth; git archive already excludes these) ---
+.env
+.env.local
+.env.selfhost.bak
+
+# --- Deploy / private infrastructure (ThinkPad self-hosted runner, /srv/jsa) ---
+.github/workflows/deploy.yml
+scripts/deploy.sh
+scripts/backup-sensitive.sh
+scripts/backfill-events-from-sqlite.sh
+docker-compose.staging.yml
+
+# --- Observability stack (Grafana/Loki/Prometheus/Promtail for the hosted box) ---
+observability
+
+# --- Private deploy runbooks ---
+docs/DEPLOY-thinkpad.md
+docs/deploy.md
+
+# --- Local backup / scratch artifacts (accidental/tracked; never publish) ---
+.local-backups
+_scratch
+
+# --- Private dev automation (auto-PR into dev, local permissions/config) ---
+.claude/hooks
+.claude/settings.json
+.claude/settings.local.json
+
+# --- License is shipped deterministically as AGPL-3.0 by the sync script ---
+# (private LICENSE is MIT; we must not let it clobber the public AGPL-3.0)
+LICENSE

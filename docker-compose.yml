@@ -1,0 +1,111 @@
+services:
+  # --- Split-stack (Go orchestrator + TS scraper) -------------------------
+  # go-backend is the sole scraper + scorer and now also serves the dashboard on
+  # :3131. The TS scraper-service does the actual scraping over HTTP.
+  scraper-service:
+    build:
+      context: .
+      dockerfile: scraper-service/Dockerfile
+    volumes:
+      # companies.json + suggested-companies.json come from the active profile.
+      - ./data:/app/data
+    # Publish to the host loopback ONLY so the shared jsa-observability Prometheus
+    # can scrape GET /metrics over host.docker.internal. /scrape and /health ride
+    # the same port; loopback-only keeps them off the LAN. Staging's .env sets
+    # SCRAPER_METRICS_PORT=4042 so both stacks can run on one box.
+    ports:
+      - '127.0.0.1:${SCRAPER_METRICS_PORT:-4041}:4040'
+    environment:
+      DATA_DIR: /app/data
+      SCRAPER_PORT: '4040'
+      SCRAPER_HOST: 0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - |
+          require('http').get('http://localhost:4040/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  go-backend:
+    build:
+      context: .
+      dockerfile: go-backend.Dockerfile
+    depends_on:
+      scraper-service:
+        condition: service_healthy
+    # Publish the dashboard to the host loopback only. It has no auth and edits
+    # secrets via Settings, so it must not be reachable from the LAN. The metrics
+    # port exposes the dedicated Prometheus /metrics listener (not the dashboard
+    # mux) to loopback so the shared jsa-observability Prometheus can scrape it
+    # over host.docker.internal. Staging's .env sets METRICS_PORT=9102.
+    ports:
+      - '127.0.0.1:${DASHBOARD_PORT:-3131}:3131'
+      - '127.0.0.1:${METRICS_PORT:-9101}:9090'
+    volumes:
+      - job_search_db:/app/db
+      # data (resume.md/context.md + profile) and .context (people/*.md) are read
+      # by the scorer and the setup wizard; public/ holds the dashboard's static
+      # assets served by handleStatic.
+      - ./data:/app/data
+      - ./.context:/app/.context
+      - ./public:/app/public
+      - ./logs:/app/logs
+    # Hosted Postgres: the image is engine-agnostic. To run multi-tenant against
+    # Supabase, set DATABASE_TYPE=postgres, DATABASE_URL (pooled proxy on :6543),
+    # and SUPABASE_URL/SUPABASE_ANON_KEY in .env (see .env.example) — no compose
+    # change needed. DB_DIR/job_search_db are unused on Postgres.
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      CONTEXT_DIR: /app/.context
+      DB_DIR: /app/db
+      PUBLIC_DIR: /app/public
+      LOG_DIR: /app/logs
+      JD_HEALTH_PATH: /app/data/jd-health.json
+      SLUG_HEALTH_PATH: /app/data/slug-health.json
+      DASHBOARD_ADDR: ':3131'
+      # Prometheus /metrics on a dedicated in-container listener, published to the
+      # host loopback via the METRICS_PORT mapping above (kept off the public mux).
+      METRICS_ADDR: ':9090'
+      SCRAPER_URL: http://scraper-service:4040
+      SCRAPE_SCHEDULE: '0 */6 * * *'
+      # On-demand scrape trigger: served in-process; the dashboard's "Scrape now"
+      # button posts here over loopback. Not published to the host.
+      TRIGGER_ADDR: ':8090'
+      SCRAPE_TRIGGER_URL: http://localhost:8090
+      # Scrape once on boot so a fresh deploy populates immediately (and writes
+      # the heartbeat) instead of waiting for the first cron tick.
+      SCRAPE_ON_START: '1'
+      # Go owns scoring and all maintenance; SCORE_SCHEDULE defaults to 15 */6.
+      SCORING_ENABLED: '1'
+      # Score the backlog on boot (after the startup scrape) so freshly-scraped
+      # jobs get scores immediately instead of sinking unscored until the first
+      # scoring cron tick.
+      SCORE_ON_START: '1'
+      # Public multi-tenant tier: every tenant scores on the shared host key, so
+      # this caps how many host-key Gemini calls a SINGLE tenant may spend per day
+      # — the per-user fairness cap that stops one signup draining the shared key
+      # for everyone. Set above normal usage (~100-315/day) once the host key is on
+      # a BILLED Gemini project with a budget alert; on the free 500/day tier keep
+      # it low (covers ~1-2 tenants). 0 disables (self-host default).
+      GEMINI_HOST_PER_TENANT_DAILY_LIMIT: '400'
+      # Copy recent global job descriptions into a tenant's pending queue before
+      # a user-triggered scrape. This gives first-run users immediate jobs to rank
+      # while discovery/scraping catches up. 0 disables.
+      GLOBAL_JOB_SEED_LIMIT: '100'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', '/server', 'healthcheck']
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  job_search_db:

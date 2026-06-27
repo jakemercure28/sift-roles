@@ -1,0 +1,28 @@
+{
+  "jobPostings": [
+    {
+      "title": "Senior DevOps Engineer",
+      "externalPath": "/job/Remote/Senior-DevOps-Engineer_R123",
+      "locationsText": "Remote, US",
+      "bulletFields": ["R123"]
+    },
+    {
+      "title": "Platform Engineer",
+      "externalPath": "/job/SF/Platform-Engineer_R456",
+      "bulletFields": ["San Francisco"]
+    },
+    {
+      "title": "Office Manager",
+      "externalPath": "/job/NY/Office-Manager_R789"
+    },
+    {
+      "title": "SRE",
+      "externalPath": "/job/Remote/SRE_R000",
+      "locationsText": "Remote"
+    },
+    {
+      "title": "DevOps Lead",
+      "locationsText": "Austin"
+    }
+  ]
+}

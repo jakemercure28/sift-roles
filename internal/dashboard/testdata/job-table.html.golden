@@ -1,0 +1,113 @@
+<div class="job-list-panel"><div class="job-list filter-all" id="job-tbody">
+    <div class="job-card score-hot" data-id="gh-1" data-status="pending" data-posted-ts="1780272000000" data-applied-ts="0" style="--score-color:var(--score-good)">
+      <div class="job-col-score">
+        <button type="button" class="score-circle score-9 has-reasoning" onclick="toggleReasoning('gh-1')" title="View reasoning" aria-label="View reasoning for this job">9</button>
+      </div>
+      <div class="job-col-info">
+        <div class="job-title"><a href="https://job-boards.greenhouse.io/acme/jobs/123" target="_blank" rel="noreferrer">Senior Platform Engineer</a></div>
+        <div class="job-meta">
+          <span class="job-meta-co">Acme &amp; Co</span>
+          <span class="badge-ats badge-ats-greenhouse">greenhouse</span>
+          <span class="job-salary">$180k–$220k</span>
+          <span class="job-loc" title="Remote - San Francisco, CA">Remote, San Francisco, CA</span>
+        </div>
+        <div class="job-tags"><span class="complexity-badge company-tag">remote</span><span class="complexity-badge company-tag">yc</span></div>
+      </div>
+      <div class="job-col-right">
+        <span class="job-posted" title="Posted Jun 1">Jun 1</span>
+        <div class="job-col-status">
+          <select class="pipeline-select" data-prev="" onchange="setPipeline('gh-1', this.value, this)" style="color:#6B7280">
+            <option value="" selected style="color:#565656">Pending</option>
+            <option value="applied"  style="color:#3E7BD6">Applied</option>
+            <option value="phone_screen"  style="color:#000000">Phone Screen</option>
+            <option value="interview"  style="color:#000000">Interview</option>
+            <option value="onsite"  style="color:#D08A2E">Onsite</option>
+            <option value="offer"  style="color:#2EA043">Offer</option>
+            <option value="closed"  style="color:#8A8A8A">Closed</option>
+            <option value="rejected"  style="color:#DC4B43">Rejected</option>
+            <option value="ghosted"  style="color:#6B7280">Ghosted</option>
+          </select>
+        </div>
+        <div class="job-col-actions">
+          <button class="btn-row-archive" onclick="archiveJob('gh-1', this)" title="Archive" aria-label="Archive job"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+      </div>
+      <div class="reasoning-panel" id="reasoning-gh-1"><div class="reasoning-panel-inner">Strong match but missing Go experience.</div></div>
+    </div>
+    <div class="job-card" data-id="wd-2" data-status="applied" data-posted-ts="1779235200000" data-applied-ts="1780444800000" style="--score-color:var(--score-borderline)">
+      <div class="job-col-score">
+        <span class="score-circle score-mid">6</span>
+      </div>
+      <div class="job-col-info">
+        <div class="job-title"><a href="https://globex.wd1.myworkdayjobs.com/job/456" target="_blank" rel="noreferrer">DevOps Engineer &lt;Cloud&gt;</a></div>
+        <div class="job-meta">
+          <span class="job-meta-co">Globex</span>
+          <span class="badge-ats badge-ats-workday">workday</span>
+          <span class="job-salary"></span>
+          <span class="job-loc" title="California - Pleasanton">Pleasanton, CA</span>
+        </div>
+        <div class="job-tags"><span class="complexity-badge company-tag tag-agency">agency</span></div>
+      </div>
+      <div class="job-col-right">
+        <span class="job-posted job-posted-applied" title="Applied Jun 3 · Posted May 20">Jun 3</span>
+        <div class="job-col-status">
+          <select class="pipeline-select" data-prev="phone_screen" onchange="setPipeline('wd-2', this.value, this)" style="color:#6366F1">
+            <option value=""  style="color:#565656">Pending</option>
+            <option value="applied"  style="color:#3E7BD6">Applied</option>
+            <option value="phone_screen" selected style="color:#000000">Phone Screen</option>
+            <option value="interview"  style="color:#000000">Interview</option>
+            <option value="onsite"  style="color:#D08A2E">Onsite</option>
+            <option value="offer"  style="color:#2EA043">Offer</option>
+            <option value="closed"  style="color:#8A8A8A">Closed</option>
+            <option value="rejected"  style="color:#DC4B43">Rejected</option>
+            <option value="ghosted"  style="color:#6B7280">Ghosted</option>
+          </select>
+        </div>
+        <div class="job-col-actions">
+          <button class="btn-row-archive" onclick="archiveJob('wd-2', this)" title="Archive" aria-label="Archive job"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+      </div>
+      
+    </div>
+    <div class="job-card" data-id="lv-3" data-status="rejected" data-posted-ts="1778803200000" data-applied-ts="0" style="--score-color:transparent">
+      <div class="job-col-score">
+        <span class="score-circle score-null" title="Awaiting score"><span class="score-spinner"></span></span>
+      </div>
+      <div class="job-col-info">
+        <div class="job-title"><button class="job-title-missing-url" type="button" title="No posting URL stored. Show saved job description." onclick="openJobDescription(&quot;lv-3&quot;,&quot;SRE&quot;,&quot;O&#39;Brien Labs&quot;)">SRE</button></div>
+        <div class="job-meta">
+          <span class="job-meta-co">O&#39;Brien Labs</span>
+          <span class="badge-ats badge-ats-lever">lever</span>
+          <span class="job-salary">≤$200k</span>
+          <span class="job-loc" title="United States, Austin">Austin</span>
+        </div>
+        <div class="job-tags"><span class="complexity-badge rejected-from">From: Interview</span><span class="complexity-badge rejected-date" title="Rejected on 2026-06-05">2026-06-05</span></div>
+      </div>
+      <div class="job-col-right">
+        <span class="job-posted" title="Rejected Jun 5">Jun 5</span>
+        <div class="job-col-status">
+          <select class="pipeline-select" data-prev="rejected" onchange="setPipeline('lv-3', this.value, this)" style="color:#DC4B43">
+            <option value=""  style="color:#565656">Pending</option>
+            <option value="applied"  style="color:#3E7BD6">Applied</option>
+            <option value="phone_screen"  style="color:#000000">Phone Screen</option>
+            <option value="interview"  style="color:#000000">Interview</option>
+            <option value="onsite"  style="color:#D08A2E">Onsite</option>
+            <option value="offer"  style="color:#2EA043">Offer</option>
+            <option value="closed"  style="color:#8A8A8A">Closed</option>
+            <option value="rejected" selected style="color:#DC4B43">Rejected</option>
+            <option value="ghosted"  style="color:#6B7280">Ghosted</option>
+          </select>
+        </div>
+        <div class="job-col-actions">
+          <button class="btn-row-archive" onclick="archiveJob('lv-3', this)" title="Archive" aria-label="Archive job"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+      </div>
+      
+    </div></div></div><div class="job-pagination">
+  <div class="pagination-summary">Showing 1-3 of 3</div>
+  <div class="pagination-controls">
+    <span class="pagination-btn disabled">&larr; Prev</span>
+    <span class="pagination-link active">1</span>
+    <span class="pagination-btn disabled">Next &rarr;</span>
+  </div>
+</div>

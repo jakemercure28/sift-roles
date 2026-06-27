@@ -1,0 +1,24 @@
+{
+  "jobs": [
+    {
+      "title": "DevOps Engineer",
+      "url": "https://jobs.lever.co/acme/abc-123",
+      "company_name": "Acme",
+      "description": "<p>Operate &amp; automate</p>",
+      "candidate_required_location": "USA Only",
+      "publication_date": "2026-05-01"
+    },
+    {
+      "title": "Platform Engineer",
+      "url": "https://example.com/job/2",
+      "company_name": "Globex",
+      "description": "Build the platform",
+      "publication_date": "2026-05-02"
+    },
+    {
+      "title": "Chef",
+      "url": "https://example.com/job/3",
+      "company_name": "Food Inc"
+    }
+  ]
+}

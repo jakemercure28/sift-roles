@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "RemoteCo",
+    "description": "Run & scale the platform",
+    "direct_apply_url": "https://boards.greenhouse.io/remoteco/jobs/99",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "",
+    "location": "Worldwide",
+    "posted_at": "2024-04-24"
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "Acme",
+    "description": "Build the platform",
+    "direct_apply_url": "https://remoteok.com/remote-jobs/2",
+    "ats_platform_name": "RemoteOK",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": "2024-04-26"
+  }
+]

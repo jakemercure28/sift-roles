@@ -1,0 +1,45 @@
+{
+  "umbrella": [
+    {
+      "text": "Staff DevOps Engineer",
+      "hostedUrl": "https://jobs.lever.co/umbrella/abc-123",
+      "descriptionPlain": "We run platforms at scale.",
+      "lists": [
+        {
+          "text": "Responsibilities",
+          "content": "<ul><li>Own CI/CD</li><li>On-call</li></ul>"
+        },
+        { "content": "<p>A section with no header</p>" },
+        { "text": "Nice to have" }
+      ],
+      "closing": "<p>Apply &amp; join us &mdash; today</p>",
+      "categories": {
+        "allLocations": ["Remote - US", "Remote - EU"],
+        "location": "Remote"
+      },
+      "createdAt": 1714000000000
+    },
+    {
+      "text": "Office Coordinator",
+      "hostedUrl": "https://jobs.lever.co/umbrella/def-456",
+      "descriptionPlain": "Front desk",
+      "categories": { "location": "NYC" },
+      "createdAt": 1714500000000
+    }
+  ],
+  "stark": [
+    {
+      "text": "Platform Engineer",
+      "hostedUrl": "https://jobs.lever.co/stark/ghi-789",
+      "description": "<p>Build &mdash; the platform</p>",
+      "lists": [],
+      "categories": { "location": "San Francisco" }
+    },
+    {
+      "text": "SRE",
+      "hostedUrl": "https://jobs.lever.co/stark/jkl-000",
+      "descriptionPlain": "Reliability and on-call",
+      "categories": {}
+    }
+  ]
+}

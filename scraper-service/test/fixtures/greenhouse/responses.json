@@ -1,0 +1,41 @@
+{
+  "acme": {
+    "jobs": [
+      {
+        "title": "Senior DevOps Engineer",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/4001",
+        "content": "<p>Build &amp; run platforms &mdash; CafÃ© culture. Ship grÃ¢ce Ã  the team.</p><ul><li>AWS</li><li>Kubernetes</li></ul>",
+        "location": { "name": "Remote - US" },
+        "offices": [{ "name": "HQ" }],
+        "updated_at": "2026-05-01T12:00:00-04:00"
+      },
+      {
+        "title": "Office Manager",
+        "absolute_url": "https://boards.greenhouse.io/acme/jobs/4002",
+        "content": "Front desk role &#38; reception",
+        "location": { "name": "New York" },
+        "updated_at": "2026-05-02T00:00:00Z"
+      }
+    ]
+  },
+  "globex": {
+    "jobs": [
+      {
+        "title": "Platform Engineer",
+        "absolute_url": "https://boards.greenhouse.io/globex/jobs/5001",
+        "content": "<div>Own   the    platform</div>",
+        "offices": [{ "name": "Berlin" }, null, { "name": "London" }],
+        "updated_at": "2026-04-15T09:30:00Z"
+      },
+      {
+        "title": "SRE",
+        "absolute_url": "https://boards.greenhouse.io/globex/jobs/5002",
+        "content": "Reliability &amp;amp; on-call",
+        "updated_at": ""
+      }
+    ]
+  },
+  "initech": {
+    "jobs": []
+  }
+}

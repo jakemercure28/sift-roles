@@ -1,0 +1,6 @@
+{
+  "SEARCH_TERMS": ["devops", "platform engineer", "sre"],
+  "WORKDAY_COMPANIES": [
+    { "sub": "acme", "wd": 5, "board": "AcmeCareers", "label": "Acme" }
+  ]
+}

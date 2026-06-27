@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%2064%2064%22%20shape-rendering=%22crispEdges%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2212%22%20fill=%22%23f4f4f5%22%2F%3E%3Cpath%20d=%22M7%209h50v10H7zM13%2021h38v8h-6v7h-7v16H26V36h-7v-7h-6z%22%20fill=%22%2318181b%22%2F%3E%3Cpath%20d=%22M17%2013h7v3h-7zM29%2013h7v3h-7zM41%2013h7v3h-7zM24%2025h16v4H24z%22%20fill=%22%23f4f4f5%22%2F%3E%3C%2Fsvg%3E">
+<title>Sift</title>
+<link rel="stylesheet" href="/public/dashboard.css?v=76">
+<style id="theme-vars">:root {
+  /* Surfaces */
+  --bg-primary: #161B22;
+  --bg-secondary: #161B22;
+  --bg-card: #161B22;
+  --bg-card-hover: #1C2128;
+  --bg-page: #0D1117;
+  --bg-gradient: #0D1117;
+
+  /* Text */
+  --text-primary: #E6EDF3;
+  --text-secondary: #ADBAC7;
+  --text-muted: #9198A1;
+  --text-dim: #6E7681;
+  --text-faint: #484F58;
+
+  /* Borders */
+  --border: #30363D;
+  --border-hover: #444C56;
+
+  /* Primary family is NEUTRAL now (the chrome is monochrome). Solids resolve to
+     a mid neutral; the rgb channel is mid-gray so all the legacy
+     rgba(var(--primary-rgb), a) washes render as subtle neutral overlays in both
+     modes. The old purple aliases (--lavender/--violet) point here too. */
+  --primary: #C8C8C8;
+  --primary-rgb: 128, 128, 128;
+  --primary-strong: #C8C8C8;
+  --primary-strong-rgb: 128, 128, 128;
+  --primary-deep: #C8C8C8;
+  --primary-deep-rgb: 128, 128, 128;
+  --primary-light: #ADBAC7;
+  --primary-light-rgb: 128, 128, 128;
+  --primary-indigo: #C8C8C8;
+  --lavender: #ADBAC7;
+  --violet: #ADBAC7;
+  --violet-rgb: 128, 128, 128;
+
+  /* Accent (GitHub green: #1F883D on light, #3FB950 on dark). Reserved for
+     active states, focus, primary actions, progress, and salary. */
+  --accent-lime: #E6EDF3;
+  --accent-lime-rgb: 230, 237, 243;
+  --accent-lime-strong: #E6EDF3;
+  --accent-lime-soft: rgba(230, 237, 243, 0.12);
+  --accent-lime-glow: rgba(230, 237, 243, 0.26);
+
+  /* Focus ring: the ink accent so interaction reads as the brand everywhere */
+  --focus-ring: #E6EDF3;
+  --focus-ring-glow: rgba(230, 237, 243, 0.28);
+
+  /* Status */
+  --green: #2EA043;
+  --green-glow: rgba(46, 160, 67, 0.12);
+  --red: #DC4B43;
+  --red-glow: rgba(220, 75, 67, 0.10);
+  --amber: #D08A2E;
+  --amber-glow: rgba(208, 138, 46, 0.10);
+  --blue: #3E7BD6;
+  --emerald: #16A06B;
+  --emerald-glow: rgba(22, 160, 107, 0.15);
+  --slate: #6B7280;
+  --slate-light: #8A8A8A;
+
+  /* ATS source — desaturated mid-tones, mode-independent (legible on both
+     surfaces). Secondary workflow signal: recognizable, never loud. */
+  --ats-greenhouse: #4F7D5E; --ats-greenhouse-rgb: 79, 125, 94;
+  --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
+  --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
+  --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+
+  /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
+  --score-good: #9C9C9C;
+  --score-borderline: #8A8A8A;
+  --score-weak: #A8A8A8;
+
+  /* Score-chip ladder — solid filled chips for the top rungs, per-mode so they
+     read on both surfaces. 10 (yellow) is the one deliberate pop of color. */
+  --highlight: #F9EA4F;
+  --highlight-ink: #000000;
+  --score-10-bg: #F9EA4F; --score-10-ink: #000000;
+  --score-9-bg: #ECECEC; --score-9-ink: #0D1117;
+  --score-8-bg: #565656; --score-8-ink: #FFFFFF;
+
+  /* Overlay tint channel + per-mode surfaces */
+  --tint-rgb: 255, 255, 255;
+  --ink-rgb: 236, 236, 236;
+  --bar-bg: rgba(13, 17, 23, 0.92);
+  --bar-sub-bg: rgba(13, 17, 23, 0.7);
+  --overlay-bg: rgba(1, 4, 9, 0.8);
+  --panel-bg: #161B22;
+  --inverse: #0D1117;
+  --shadow-rgb: 0, 0, 0;
+
+  /* Glass + misc */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-blur: blur(12px);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Practical UI scales. Mode-independent (like --radius), so they read from
+     SHARED. Spacing is an 8pt scale with 2/4px sub-steps for the dense table;
+     --page-gutter is the single shared horizontal page margin (header + list
+     align to it). Overridden per-breakpoint in dashboard.css. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-xs: 8px;
+  --space-s: 16px;
+  --space-m: 24px;
+  --space-l: 32px;
+  --space-xl: 48px;
+  --space-xxl: 80px;
+  --page-gutter: 48px;
+  --feed-measure: 1400px;
+
+  --text-meta: 11px;
+  --text-label: 12px;
+  --text-body: 14px;
+  --text-tiny: 16px;
+  --text-small: 18px;
+  --text-h4: 20px;
+  --text-h3: 24px;
+  --text-h2: 32px;
+  --text-h1: 40px;
+
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --lead-tight: 1.3;
+  --lead-body: 1.6;
+
+  /* Legacy aliases. --accent marks active/interactive states, so it points at
+     the ink accent; the old purple aliases resolve to the neutral primary. */
+  --accent: var(--accent-lime);
+  --accent-glow: rgba(var(--accent-lime-rgb), 0.12);
+  --purple: var(--primary);
+  --standard-purple: var(--primary);
+  --deep-purple: var(--primary-deep);
+  --vibrant-purple: var(--primary-light);
+  --muted-indigo: var(--primary-indigo);
+  --lime-accent: var(--accent-lime);
+  --violet-glow: rgba(var(--violet-rgb), 0.16);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+  /* Surfaces */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F5;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F5F5F5;
+  --bg-page: #FFFFFF;
+  --bg-gradient: #FFFFFF;
+
+  /* Text */
+  --text-primary: #000000;
+  --text-secondary: #1A1A1A;
+  --text-muted: #6B6B6B;
+  --text-dim: #999999;
+  --text-faint: #B8B8B8;
+
+  /* Borders */
+  --border: #ECECEC;
+  --border-hover: #B8B8B8;
+
+  /* Primary family is NEUTRAL now (the chrome is monochrome). Solids resolve to
+     a mid neutral; the rgb channel is mid-gray so all the legacy
+     rgba(var(--primary-rgb), a) washes render as subtle neutral overlays in both
+     modes. The old purple aliases (--lavender/--violet) point here too. */
+  --primary: #000000;
+  --primary-rgb: 128, 128, 128;
+  --primary-strong: #000000;
+  --primary-strong-rgb: 128, 128, 128;
+  --primary-deep: #000000;
+  --primary-deep-rgb: 128, 128, 128;
+  --primary-light: #1A1A1A;
+  --primary-light-rgb: 128, 128, 128;
+  --primary-indigo: #000000;
+  --lavender: #1A1A1A;
+  --violet: #1A1A1A;
+  --violet-rgb: 128, 128, 128;
+
+  /* Accent (GitHub green: #1F883D on light, #3FB950 on dark). Reserved for
+     active states, focus, primary actions, progress, and salary. */
+  --accent-lime: #000000;
+  --accent-lime-rgb: 0, 0, 0;
+  --accent-lime-strong: #000000;
+  --accent-lime-soft: rgba(0, 0, 0, 0.12);
+  --accent-lime-glow: rgba(0, 0, 0, 0.26);
+
+  /* Focus ring: the ink accent so interaction reads as the brand everywhere */
+  --focus-ring: #000000;
+  --focus-ring-glow: rgba(0, 0, 0, 0.28);
+
+  /* Status */
+  --green: #2EA043;
+  --green-glow: rgba(46, 160, 67, 0.12);
+  --red: #DC4B43;
+  --red-glow: rgba(220, 75, 67, 0.10);
+  --amber: #D08A2E;
+  --amber-glow: rgba(208, 138, 46, 0.10);
+  --blue: #3E7BD6;
+  --emerald: #16A06B;
+  --emerald-glow: rgba(22, 160, 107, 0.15);
+  --slate: #6B7280;
+  --slate-light: #8A8A8A;
+
+  /* ATS source — desaturated mid-tones, mode-independent (legible on both
+     surfaces). Secondary workflow signal: recognizable, never loud. */
+  --ats-greenhouse: #4F7D5E; --ats-greenhouse-rgb: 79, 125, 94;
+  --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
+  --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
+  --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+
+  /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
+  --score-good: #4A4A4A;
+  --score-borderline: #6B6B6B;
+  --score-weak: #8A8A8A;
+
+  /* Score-chip ladder — solid filled chips for the top rungs, per-mode so they
+     read on both surfaces. 10 (yellow) is the one deliberate pop of color. */
+  --highlight: #F9EA4F;
+  --highlight-ink: #000000;
+  --score-10-bg: #F9EA4F; --score-10-ink: #000000;
+  --score-9-bg: #111111; --score-9-ink: #FFFFFF;
+  --score-8-bg: #565656; --score-8-ink: #FFFFFF;
+
+  /* Overlay tint channel + per-mode surfaces */
+  --tint-rgb: 0, 0, 0;
+  --ink-rgb: 26, 26, 26;
+  --bar-bg: rgba(255, 255, 255, 0.85);
+  --bar-sub-bg: rgba(246, 248, 250, 0.75);
+  --overlay-bg: rgba(20, 20, 20, 0.4);
+  --panel-bg: #FFFFFF;
+  --inverse: #FFFFFF;
+  --shadow-rgb: 20, 20, 20;
+
+  /* Glass + misc */
+  --glass-bg: rgba(0, 0, 0, 0.02);
+  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass-blur: blur(12px);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Practical UI scales. Mode-independent (like --radius), so they read from
+     SHARED. Spacing is an 8pt scale with 2/4px sub-steps for the dense table;
+     --page-gutter is the single shared horizontal page margin (header + list
+     align to it). Overridden per-breakpoint in dashboard.css. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-xs: 8px;
+  --space-s: 16px;
+  --space-m: 24px;
+  --space-l: 32px;
+  --space-xl: 48px;
+  --space-xxl: 80px;
+  --page-gutter: 48px;
+  --feed-measure: 1400px;
+
+  --text-meta: 11px;
+  --text-label: 12px;
+  --text-body: 14px;
+  --text-tiny: 16px;
+  --text-small: 18px;
+  --text-h4: 20px;
+  --text-h3: 24px;
+  --text-h2: 32px;
+  --text-h1: 40px;
+
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --lead-tight: 1.3;
+  --lead-body: 1.6;
+
+  /* Legacy aliases. --accent marks active/interactive states, so it points at
+     the ink accent; the old purple aliases resolve to the neutral primary. */
+  --accent: var(--accent-lime);
+  --accent-glow: rgba(var(--accent-lime-rgb), 0.12);
+  --purple: var(--primary);
+  --standard-purple: var(--primary);
+  --deep-purple: var(--primary-deep);
+  --vibrant-purple: var(--primary-light);
+  --muted-indigo: var(--primary-indigo);
+  --lime-accent: var(--accent-lime);
+  --violet-glow: rgba(var(--violet-rgb), 0.16);
+  }
+}
+:root[data-theme="light"] {
+  /* Surfaces */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F5;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F5F5F5;
+  --bg-page: #FFFFFF;
+  --bg-gradient: #FFFFFF;
+
+  /* Text */
+  --text-primary: #000000;
+  --text-secondary: #1A1A1A;
+  --text-muted: #6B6B6B;
+  --text-dim: #999999;
+  --text-faint: #B8B8B8;
+
+  /* Borders */
+  --border: #ECECEC;
+  --border-hover: #B8B8B8;
+
+  /* Primary family is NEUTRAL now (the chrome is monochrome). Solids resolve to
+     a mid neutral; the rgb channel is mid-gray so all the legacy
+     rgba(var(--primary-rgb), a) washes render as subtle neutral overlays in both
+     modes. The old purple aliases (--lavender/--violet) point here too. */
+  --primary: #000000;
+  --primary-rgb: 128, 128, 128;
+  --primary-strong: #000000;
+  --primary-strong-rgb: 128, 128, 128;
+  --primary-deep: #000000;
+  --primary-deep-rgb: 128, 128, 128;
+  --primary-light: #1A1A1A;
+  --primary-light-rgb: 128, 128, 128;
+  --primary-indigo: #000000;
+  --lavender: #1A1A1A;
+  --violet: #1A1A1A;
+  --violet-rgb: 128, 128, 128;
+
+  /* Accent (GitHub green: #1F883D on light, #3FB950 on dark). Reserved for
+     active states, focus, primary actions, progress, and salary. */
+  --accent-lime: #000000;
+  --accent-lime-rgb: 0, 0, 0;
+  --accent-lime-strong: #000000;
+  --accent-lime-soft: rgba(0, 0, 0, 0.12);
+  --accent-lime-glow: rgba(0, 0, 0, 0.26);
+
+  /* Focus ring: the ink accent so interaction reads as the brand everywhere */
+  --focus-ring: #000000;
+  --focus-ring-glow: rgba(0, 0, 0, 0.28);
+
+  /* Status */
+  --green: #2EA043;
+  --green-glow: rgba(46, 160, 67, 0.12);
+  --red: #DC4B43;
+  --red-glow: rgba(220, 75, 67, 0.10);
+  --amber: #D08A2E;
+  --amber-glow: rgba(208, 138, 46, 0.10);
+  --blue: #3E7BD6;
+  --emerald: #16A06B;
+  --emerald-glow: rgba(22, 160, 107, 0.15);
+  --slate: #6B7280;
+  --slate-light: #8A8A8A;
+
+  /* ATS source — desaturated mid-tones, mode-independent (legible on both
+     surfaces). Secondary workflow signal: recognizable, never loud. */
+  --ats-greenhouse: #4F7D5E; --ats-greenhouse-rgb: 79, 125, 94;
+  --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
+  --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
+  --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+
+  /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
+  --score-good: #4A4A4A;
+  --score-borderline: #6B6B6B;
+  --score-weak: #8A8A8A;
+
+  /* Score-chip ladder — solid filled chips for the top rungs, per-mode so they
+     read on both surfaces. 10 (yellow) is the one deliberate pop of color. */
+  --highlight: #F9EA4F;
+  --highlight-ink: #000000;
+  --score-10-bg: #F9EA4F; --score-10-ink: #000000;
+  --score-9-bg: #111111; --score-9-ink: #FFFFFF;
+  --score-8-bg: #565656; --score-8-ink: #FFFFFF;
+
+  /* Overlay tint channel + per-mode surfaces */
+  --tint-rgb: 0, 0, 0;
+  --ink-rgb: 26, 26, 26;
+  --bar-bg: rgba(255, 255, 255, 0.85);
+  --bar-sub-bg: rgba(246, 248, 250, 0.75);
+  --overlay-bg: rgba(20, 20, 20, 0.4);
+  --panel-bg: #FFFFFF;
+  --inverse: #FFFFFF;
+  --shadow-rgb: 20, 20, 20;
+
+  /* Glass + misc */
+  --glass-bg: rgba(0, 0, 0, 0.02);
+  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass-blur: blur(12px);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Practical UI scales. Mode-independent (like --radius), so they read from
+     SHARED. Spacing is an 8pt scale with 2/4px sub-steps for the dense table;
+     --page-gutter is the single shared horizontal page margin (header + list
+     align to it). Overridden per-breakpoint in dashboard.css. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-xs: 8px;
+  --space-s: 16px;
+  --space-m: 24px;
+  --space-l: 32px;
+  --space-xl: 48px;
+  --space-xxl: 80px;
+  --page-gutter: 48px;
+  --feed-measure: 1400px;
+
+  --text-meta: 11px;
+  --text-label: 12px;
+  --text-body: 14px;
+  --text-tiny: 16px;
+  --text-small: 18px;
+  --text-h4: 20px;
+  --text-h3: 24px;
+  --text-h2: 32px;
+  --text-h1: 40px;
+
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --lead-tight: 1.3;
+  --lead-body: 1.6;
+
+  /* Legacy aliases. --accent marks active/interactive states, so it points at
+     the ink accent; the old purple aliases resolve to the neutral primary. */
+  --accent: var(--accent-lime);
+  --accent-glow: rgba(var(--accent-lime-rgb), 0.12);
+  --purple: var(--primary);
+  --standard-purple: var(--primary);
+  --deep-purple: var(--primary-deep);
+  --vibrant-purple: var(--primary-light);
+  --muted-indigo: var(--primary-indigo);
+  --lime-accent: var(--accent-lime);
+  --violet-glow: rgba(var(--violet-rgb), 0.16);
+}
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --bg-primary: #161B22;
+  --bg-secondary: #161B22;
+  --bg-card: #161B22;
+  --bg-card-hover: #1C2128;
+  --bg-page: #0D1117;
+  --bg-gradient: #0D1117;
+
+  /* Text */
+  --text-primary: #E6EDF3;
+  --text-secondary: #ADBAC7;
+  --text-muted: #9198A1;
+  --text-dim: #6E7681;
+  --text-faint: #484F58;
+
+  /* Borders */
+  --border: #30363D;
+  --border-hover: #444C56;
+
+  /* Primary family is NEUTRAL now (the chrome is monochrome). Solids resolve to
+     a mid neutral; the rgb channel is mid-gray so all the legacy
+     rgba(var(--primary-rgb), a) washes render as subtle neutral overlays in both
+     modes. The old purple aliases (--lavender/--violet) point here too. */
+  --primary: #C8C8C8;
+  --primary-rgb: 128, 128, 128;
+  --primary-strong: #C8C8C8;
+  --primary-strong-rgb: 128, 128, 128;
+  --primary-deep: #C8C8C8;
+  --primary-deep-rgb: 128, 128, 128;
+  --primary-light: #ADBAC7;
+  --primary-light-rgb: 128, 128, 128;
+  --primary-indigo: #C8C8C8;
+  --lavender: #ADBAC7;
+  --violet: #ADBAC7;
+  --violet-rgb: 128, 128, 128;
+
+  /* Accent (GitHub green: #1F883D on light, #3FB950 on dark). Reserved for
+     active states, focus, primary actions, progress, and salary. */
+  --accent-lime: #E6EDF3;
+  --accent-lime-rgb: 230, 237, 243;
+  --accent-lime-strong: #E6EDF3;
+  --accent-lime-soft: rgba(230, 237, 243, 0.12);
+  --accent-lime-glow: rgba(230, 237, 243, 0.26);
+
+  /* Focus ring: the ink accent so interaction reads as the brand everywhere */
+  --focus-ring: #E6EDF3;
+  --focus-ring-glow: rgba(230, 237, 243, 0.28);
+
+  /* Status */
+  --green: #2EA043;
+  --green-glow: rgba(46, 160, 67, 0.12);
+  --red: #DC4B43;
+  --red-glow: rgba(220, 75, 67, 0.10);
+  --amber: #D08A2E;
+  --amber-glow: rgba(208, 138, 46, 0.10);
+  --blue: #3E7BD6;
+  --emerald: #16A06B;
+  --emerald-glow: rgba(22, 160, 107, 0.15);
+  --slate: #6B7280;
+  --slate-light: #8A8A8A;
+
+  /* ATS source — desaturated mid-tones, mode-independent (legible on both
+     surfaces). Secondary workflow signal: recognizable, never loud. */
+  --ats-greenhouse: #4F7D5E; --ats-greenhouse-rgb: 79, 125, 94;
+  --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
+  --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
+  --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+
+  /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
+  --score-good: #9C9C9C;
+  --score-borderline: #8A8A8A;
+  --score-weak: #A8A8A8;
+
+  /* Score-chip ladder — solid filled chips for the top rungs, per-mode so they
+     read on both surfaces. 10 (yellow) is the one deliberate pop of color. */
+  --highlight: #F9EA4F;
+  --highlight-ink: #000000;
+  --score-10-bg: #F9EA4F; --score-10-ink: #000000;
+  --score-9-bg: #ECECEC; --score-9-ink: #0D1117;
+  --score-8-bg: #565656; --score-8-ink: #FFFFFF;
+
+  /* Overlay tint channel + per-mode surfaces */
+  --tint-rgb: 255, 255, 255;
+  --ink-rgb: 236, 236, 236;
+  --bar-bg: rgba(13, 17, 23, 0.92);
+  --bar-sub-bg: rgba(13, 17, 23, 0.7);
+  --overlay-bg: rgba(1, 4, 9, 0.8);
+  --panel-bg: #161B22;
+  --inverse: #0D1117;
+  --shadow-rgb: 0, 0, 0;
+
+  /* Glass + misc */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-blur: blur(12px);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Practical UI scales. Mode-independent (like --radius), so they read from
+     SHARED. Spacing is an 8pt scale with 2/4px sub-steps for the dense table;
+     --page-gutter is the single shared horizontal page margin (header + list
+     align to it). Overridden per-breakpoint in dashboard.css. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-xs: 8px;
+  --space-s: 16px;
+  --space-m: 24px;
+  --space-l: 32px;
+  --space-xl: 48px;
+  --space-xxl: 80px;
+  --page-gutter: 48px;
+  --feed-measure: 1400px;
+
+  --text-meta: 11px;
+  --text-label: 12px;
+  --text-body: 14px;
+  --text-tiny: 16px;
+  --text-small: 18px;
+  --text-h4: 20px;
+  --text-h3: 24px;
+  --text-h2: 32px;
+  --text-h1: 40px;
+
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --lead-tight: 1.3;
+  --lead-body: 1.6;
+
+  /* Legacy aliases. --accent marks active/interactive states, so it points at
+     the ink accent; the old purple aliases resolve to the neutral primary. */
+  --accent: var(--accent-lime);
+  --accent-glow: rgba(var(--accent-lime-rgb), 0.12);
+  --purple: var(--primary);
+  --standard-purple: var(--primary);
+  --deep-purple: var(--primary-deep);
+  --vibrant-purple: var(--primary-light);
+  --muted-indigo: var(--primary-indigo);
+  --lime-accent: var(--accent-lime);
+  --violet-glow: rgba(var(--violet-rgb), 0.16);
+}</style>
+<script>
+// Apply the saved theme before first paint so there is no flash. With no saved
+// choice we leave data-theme unset so the prefers-color-scheme media query in
+// the theme stylesheet drives the first render (follow system).
+(function() {
+  try {
+    var saved = localStorage.getItem('dashboard-theme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  } catch (e) {}
+})();
+</script>
+<script>
+window.loadDashboardChart = function(callback) {
+  if (window.Chart) { callback(); return; }
+  if (window._dashboardChartLoading) {
+    window._dashboardChartCallbacks.push(callback);
+    return;
+  }
+  window._dashboardChartLoading = true;
+  window._dashboardChartCallbacks = [callback];
+  var script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+  script.defer = true;
+  script.onload = function() {
+    var callbacks = window._dashboardChartCallbacks || [];
+    window._dashboardChartCallbacks = [];
+    callbacks.forEach(function(fn) { fn(); });
+  };
+  script.onerror = function() {
+    window._dashboardChartLoading = false;
+    window._dashboardChartCallbacks = [];
+  };
+  document.head.appendChild(script);
+};
+</script>
+</head>
+<body>
+<div class="app-shell" id="app-shell">
+<aside class="sidebar" id="app-sidebar">
+  <div class="sidebar-head">
+    <span class="sidebar-brand" aria-label="Sift"><svg class="brand-wordmark" width="212" height="58" viewBox="0 0 212 58" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><g shape-rendering="crispEdges"><path d="M8 10h42v8H8zM13 20h32v7h-5v6h-6v13H24V33h-6v-6h-5z" fill="currentColor"/><path d="M17 13h6v3h-6zM28 13h6v3h-6zM39 13h6v3h-6zM22 23h14v4H22z" fill="var(--brand-cutout)"/></g><text x="58" y="45" fill="currentColor" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="48" font-style="italic" font-weight="800" letter-spacing="3">sift</text></svg><span class="sidebar-brand-compact"><svg class="brand-mark sidebar-logo" width="34" height="34" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" shape-rendering="crispEdges"><path d="M7 9h50v10H7zM13 21h38v8h-6v7h-7v16H26V36h-7v-7h-6z" fill="currentColor"/><path d="M17 13h7v3h-7zM29 13h7v3h-7zM41 13h7v3h-7zM24 25h16v4H24z" fill="var(--brand-cutout)"/></svg></span></span>
+    <button class="sidebar-close" type="button" onclick="toggleSidebar()" aria-label="Close menu"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <a class="nav-item" href="/?filter=not-applied&sort=score" data-filter="not-applied"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg><span class="nav-label">Jobs</span></a>
+      <a class="nav-item" href="/?filter=applied&sort=score" data-filter="applied"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg><span class="nav-label">Applications</span></a>
+      <a class="nav-item" href="/?filter=interviewing&sort=score" data-filter="interviewing"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span class="nav-label">Interviews</span></a>
+      <a class="nav-item" href="/?filter=offers&sort=score" data-filter="offers"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 15 9l7 .6-5.3 4.6L18.4 21 12 17.3 5.6 21 7.3 14.2 2 9.6 9 9z"/></svg><span class="nav-label">Offers</span></a>
+    </div>
+    <div class="nav-group">
+      <a class="nav-item" href="/?filter=analytics&sort=score" data-filter="analytics"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/></svg><span class="nav-label">Analytics</span></a>
+      <a class="nav-item" href="/?filter=market-research&sort=score" data-filter="market-research"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M8 9h2"/></svg><span class="nav-label">Market Research</span></a>
+      <a class="nav-item" href="/?filter=activity-log&sort=score" data-filter="activity-log"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="nav-label">Event Log</span></a>
+    </div>
+    <details class="nav-more" open>
+      <summary class="nav-more-summary">More<svg class="nav-more-caret" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></summary>
+      <div class="nav-more-items">
+        <a class="nav-item nav-subitem active" href="/?filter=all&sort=score" data-filter="all"><span class="nav-label">All Jobs</span></a>
+        <a class="nav-item nav-subitem" href="/?filter=archived&sort=score" data-filter="archived"><span class="nav-label">Archive</span></a>
+        <a class="nav-item nav-subitem" href="/?filter=rejected&sort=date" data-filter="rejected"><span class="nav-label">Rejected</span></a>
+        <a class="nav-item nav-subitem" href="/?filter=closed&sort=score" data-filter="closed"><span class="nav-label">Closed</span></a>
+        <a class="nav-item nav-subitem" href="/?filter=ghosted&sort=score" data-filter="ghosted"><span class="nav-label">Ghosted</span></a>
+        <a class="nav-item nav-subitem" href="/report-problem"><span class="nav-label">Report Problem</span></a>
+      </div>
+    </details>
+    <div class="nav-spacer"></div>
+    <div class="nav-group">
+      <button class="nav-item" type="button" onclick="openSettings()"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="nav-label">Settings</span></button>
+      <button class="nav-item" type="button" onclick="toggleTheme()" aria-label="Toggle theme"><svg id="theme-icon-moon" class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><svg id="theme-icon-sun" class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg><span class="nav-label">Theme</span></button>
+    </div>
+  </nav>
+</aside>
+<div class="sidebar-backdrop" onclick="toggleSidebar()" aria-hidden="true"></div>
+<main class="content">
+  <div class="content-header">
+    <button class="content-menu-btn" type="button" onclick="toggleSidebar()" aria-label="Open menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <div class="content-headline" id="dashboard-title">
+      <h1 class="content-title">All Jobs</h1>
+    </div>
+    <div class="content-tools">
+      
+<div class="content-filters" id="dashboard-filters">
+  <div class="dd-wrap">
+    <button class="loc-trigger" id="loc-panel-btn" onclick="toggleLocPanel()" title="Location">
+      <span>All locations</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div id="loc-panel" class="loc-dropdown">
+      <button class="menu-item active" onclick="setLocationPref('')">All locations</button><button class="menu-item" onclick="setLocationPref('seattle')">Seattle</button><button class="menu-item" onclick="setLocationPref('portland')">Portland</button><button class="menu-item" onclick="setLocationPref('sf-bay')">SF Bay Area</button><button class="menu-item" onclick="setLocationPref('la')">Los Angeles</button><button class="menu-item" onclick="setLocationPref('san-diego')">San Diego</button><button class="menu-item" onclick="setLocationPref('nyc')">New York</button><button class="menu-item" onclick="setLocationPref('boston')">Boston</button><button class="menu-item" onclick="setLocationPref('austin')">Austin</button><button class="menu-item" onclick="setLocationPref('denver')">Denver / Boulder</button><button class="menu-item" onclick="setLocationPref('chicago')">Chicago</button><button class="menu-item" onclick="setLocationPref('dc')">DC / Northern Virginia</button><button class="menu-item" onclick="setLocationPref('atlanta')">Atlanta</button>
+      <div class="menu-divider"></div>
+    <button class="menu-item loc-toggle-row" role="switch" aria-checked="false" onclick="setRemotePref(true)">
+      <span>Remote only</span>
+      <span class="loc-toggle" aria-hidden="true"></span>
+    </button>
+      <button class="menu-item loc-toggle-row loc-unlisted-row" role="switch" aria-checked="true" onclick="setLocationPref('', false)">
+      <span>Include unlisted</span>
+      <span class="loc-toggle on" aria-hidden="true"></span>
+    </button>
+    </div>
+  </div>
+  <a class="loc-trigger sort-toggle" href="/?filter=all&sort=date" title="Sort">Sort: Score</a>
+</div>
+      <input class="search-box" type="text" placeholder="Search jobs, companies, roles…" value="" oninput="applyFilters()" />
+    </div>
+  </div>
+  <div id="scoring-progress-banner" class="scoring-banner" style="display:none">
+    <span class="scoring-banner-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></span>
+    <span id="scoring-progress-msg"></span>
+  </div>
+  <div id="dashboard-main">
+
+
+<div class="job-list-panel"><div class="empty">No jobs found for this filter.</div></div>
+  </div>
+</main>
+</div>
+<div class="toast" id="toast"></div>
+
+
+<!-- Onboarding wizard -->
+<div class="modal-overlay" id="onboarding-wizard">
+  <div class="modal wizard-modal" style="max-width:580px;max-height:90vh;overflow-y:auto">
+
+    <!-- Resume upload (only step) -->
+    <div class="wizard-step active" id="wstep-2">
+      <h2>Drop in your resume to get started</h2>
+      <p class="modal-sub">We'll handle the rest. PDF, plain text, or markdown all work.</p>
+      <input type="file" id="wizard-resume-file" accept=".pdf,.txt,.md" style="display:none" onchange="wizardResumeFileChanged()" />
+      <div id="wizard-resume-upload-area" style="display:flex;align-items:center;gap:12px;margin:16px 0 4px">
+        <button class="btn" style="background:var(--slate);color:var(--text-primary);white-space:nowrap" onclick="document.getElementById('wizard-resume-file').click()">Choose file</button>
+        <span id="wizard-resume-filename" style="font-size:13px;color:var(--text-muted)">No file chosen</span>
+      </div>
+      <div id="wizard-resume-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:12px"></div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" id="wizard-resume-save-btn" style="background:#000000;color:white" onclick="wizardSaveResume()">Get started</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Settings modal -->
+<div class="modal-overlay" id="settings-modal" onclick="settingsOverlayClick(event)">
+  <div class="modal wizard-modal" style="width:660px;max-width:94vw;height:82vh;max-height:760px;display:flex;flex-direction:column">
+    <h2>Settings</h2>
+    <p class="modal-sub">Change your setup without editing files or restarting. Worker knobs apply on the next refresh.</p>
+    <div class="modal-tabs" id="settings-tabs" style="flex:none">
+      <button class="modal-tab active" data-tab="resume" onclick="settingsShowTab('resume')">Resume</button>
+      <button class="modal-tab" data-tab="profile" onclick="settingsShowTab('profile')">Profile</button>
+      <button class="modal-tab" data-tab="companies" onclick="settingsShowTab('companies')">Targets</button>
+      <button class="modal-tab" data-tab="integrations" onclick="settingsShowTab('integrations')">Integrations</button>
+    </div>
+
+    <!-- Scrolling content area: keeps the modal a fixed height so it doesn't
+         jump when switching tabs; only this region scrolls. -->
+    <div class="settings-body" style="flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;min-height:0;margin-top:4px">
+
+    <!-- Resume -->
+    <div class="settings-panel active" data-panel="resume">
+      <p class="modal-sub">Replace your resume. PDF, plain text, or markdown. PDF extraction uses one Gemini call.</p>
+      <input type="file" id="settings-resume-file" accept=".pdf,.txt,.md" style="display:none" onchange="settingsResumeFileChanged()" />
+      <div style="display:flex;align-items:center;gap:12px;margin:8px 0">
+        <button class="btn" style="background:var(--slate);color:var(--text-primary);white-space:nowrap" onclick="document.getElementById('settings-resume-file').click()">Choose file</button>
+        <span id="settings-resume-filename" style="font-size:13px;color:var(--text-muted)">No file chosen</span>
+      </div>
+      <div id="settings-resume-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
+      <div class="modal-actions" style="margin-top:12px">
+        <button class="btn" id="settings-resume-save-btn" style="background:#000000;color:white" onclick="settingsSaveResume()">Upload resume</button>
+      </div>
+    </div>
+
+    <!-- Profile & preferences -->
+    <div class="settings-panel" data-panel="profile" style="display:none">
+      <p class="modal-sub">What the scorer looks for. Matching jobs rank higher.</p>
+      <div id="settings-profile-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+      <div class="wizard-field-group">
+        <label for="settings-titles">Target titles <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-titles" rows="5" placeholder="Senior Backend Engineer&#10;Platform Engineer"></textarea>
+
+        <label for="settings-stack">Tech stack <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-stack" rows="5" placeholder="Go&#10;Kubernetes&#10;Postgres"></textarea>
+
+        <label for="settings-salary">Base salary floor <span class="wizard-field-hint">(numbers only, optional)</span></label>
+        <input id="settings-salary" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="180000" />
+
+        <label for="settings-location">Location preference <span class="wizard-field-hint">(optional)</span></label>
+        <input id="settings-location" type="text" placeholder="Remote or Austin, TX" style="margin-bottom:0" />
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" style="background:var(--slate);color:#fff" onclick="settingsExtractProfile()" id="settings-extract-btn">Re-extract from resume</button>
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveProfile()" id="settings-profile-save-btn">Save profile</button>
+      </div>
+    </div>
+
+    <!-- Target companies / search terms -->
+    <div class="settings-panel" data-panel="companies" style="display:none">
+      <p class="modal-sub">Keywords that cast the scrape net over job titles. Broader = more candidates to score.</p>
+      <div id="settings-companies-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin-bottom:6px"></div>
+      <div class="wizard-field-group">
+        <label for="settings-max-age">Job freshness <span class="wizard-field-hint">(only show jobs posted within this many days)</span></label>
+        <input id="settings-max-age" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="20" />
+        <div class="wizard-field-hint" style="margin:2px 0 8px">Default: 20 days. Lower = fresher but fewer jobs.</div>
+
+        <label for="settings-terms">Search terms <span class="wizard-field-hint">(one per line)</span></label>
+        <textarea id="settings-terms" rows="8" placeholder="backend engineer&#10;platform&#10;devops"></textarea>
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveCompanies()" id="settings-companies-save-btn">Save targets</button>
+      </div>
+    </div>
+
+    <!-- Integrations (Gmail rejection-email sync) -->
+    <div class="settings-panel" data-panel="integrations" style="display:none">
+      <p class="modal-sub">Gmail rejection email sync. Rejection emails automatically move the matching application to Rejected. Use a Google app password, not your account password.</p>
+      <div id="settings-rejection-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin:2px 0 10px">Checking sync status…</div>
+      <div id="settings-integrations-fields" style="margin-top:4px"></div>
+      <div id="settings-integrations-status" style="min-height:18px;font-size:12px;color:var(--text-muted);margin:8px 0"></div>
+      <div class="modal-actions" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" style="background:#000000;color:white" onclick="settingsSaveApp()" id="settings-integrations-save-btn">Save integrations</button>
+        <button class="btn" style="background:var(--slate);color:var(--text-primary)" onclick="settingsRejectionSyncNow()" id="settings-sync-now-btn">Sync now</button>
+      </div>
+    </div>
+    </div><!-- /.settings-body -->
+
+    <div class="modal-actions" style="flex:none;margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+      <button class="btn" style="background:var(--slate);color:#fff" onclick="closeSettings()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Job description modal -->
+<div class="modal-overlay" id="jd-modal">
+  <div class="modal" style="max-width:720px">
+    <h2 id="jd-modal-title">Job Description</h2>
+    <div class="modal-sub" id="jd-modal-sub"></div>
+    <div id="jd-modal-body" style="white-space:pre-wrap;font-size:13px;line-height:1.6;max-height:60vh;overflow-y:auto;margin-top:12px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary)"></div>
+    <div class="modal-actions">
+      <button class="btn" style="background:var(--slate);color:#fff" onclick="document.getElementById('jd-modal').style.display='none'">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Company notes modal -->
+<div class="modal-overlay" id="company-notes-modal">
+  <div class="modal">
+    <h2>Company Notes</h2>
+    <div class="modal-sub" id="company-notes-sub"></div>
+    <label for="company-tags-input">Tags <span style="font-size:11px;color:#8A8A8A">(comma-separated, e.g. "recently funded, network connection")</span></label>
+    <input id="company-tags-input" type="text" placeholder="e.g. recently funded, network connection" autocomplete="off" />
+    <label for="company-notes-input" style="margin-top:12px">Notes</label>
+    <textarea id="company-notes-input" rows="4" placeholder="Freeform notes about this company..." style="width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical"></textarea>
+    <div class="modal-actions">
+      <button class="btn" style="background:#565656;color:#8A8A8A" onclick="closeCompanyNotes()">Cancel</button>
+      <button class="btn" style="background:#000000;color:white" onclick="saveCompanyNotes()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>window.__THEME__ = {"pipeline":{"":"#6B7280","applied":"#3E7BD6","phone_screen":"#6366F1","interview":"#0E9488","onsite":"#D08A2E","offer":"#2EA043","closed":"#8A8A8A","rejected":"#DC4B43","ghosted":"#6B7280"},"scores":{"good":"#9C9C9C","borderline":"#8A8A8A","weak":"#A8A8A8"},"primary":"#000000","accent":"#000000","success":"#2EA043","danger":"#DC4B43","warning":"#D08A2E","neutral":"#565656"};</script>
+<script defer src="/public/js/nav.js?v=11"></script>
+<script defer src="/public/js/ui.js?v=11"></script>
+<script defer src="/public/js/pipeline.js?v=2"></script>
+<script defer src="/public/js/wizard.js?v=9"></script>
+<script defer src="/public/js/settings.js?v=9"></script>
+<script defer src="/public/js/effects.js?v=13"></script>
+</body>
+</html>

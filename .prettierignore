@@ -1,0 +1,21 @@
+node_modules/
+.claude/worktrees/
+public/bookmarklet.js
+coverage/
+*.db
+*.pdf
+jobs.json
+data/
+.context/
+*.md
+
+# Scraper parity fixtures are byte-exact captured payloads (HTML/RSS/JSON);
+# reformatting them would change the bytes the scrapers parse.
+scraper-service/test/fixtures/
+
+# Go-embedded HTML ports must stay byte-identical to the Node renderer output
+# (verified by golden parity); prettier reformatting would break that.
+internal/dashboard/modals.html
+internal/dashboard/testdata/
+internal/dashboard/report-problem-head.html
+internal/dashboard/report-problem-tail.html

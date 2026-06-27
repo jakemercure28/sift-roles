@@ -1,0 +1,81 @@
+
+<div class="analytics-wrap">
+  <div class="analytics-section market-section">
+    <h2 class="analytics-title">Activity Log</h2>
+    <p class="analytics-hint"><span style="font-family:var(--font-mono)">10</span> total events</p>
+    
+    <table class="calibration-table" id="events-table">
+      <thead><tr><th>Time</th><th>Type</th><th>Company</th><th>Change</th></tr></thead><tbody>
+      <tr>
+        <td class="evt-time" data-ts="2026-06-03T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">Jun 3, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Acme</td>
+        <td>Applied &rarr; Phone Screen</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-06-02T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">Jun 2, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Hooli</td>
+        <td>Pending &rarr; Applied</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-06-01T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">Jun 1, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Acme</td>
+        <td>Pending &rarr; Applied</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-05-25T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">May 25, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Globex</td>
+        <td>Interview &rarr; Rejected</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-05-21T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">May 21, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Wonka</td>
+        <td>Pending &rarr; Applied</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-05-20T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">May 20, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Globex</td>
+        <td>Applied &rarr; Interview</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-05-15T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">May 15, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Globex</td>
+        <td>Pending &rarr; Applied</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-05-01T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">May 1, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Initech</td>
+        <td>Pending &rarr; Applied</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-04-12T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">Apr 12, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Soylent</td>
+        <td>Interview &rarr; Rejected</td>
+      </tr>
+      <tr>
+        <td class="evt-time" data-ts="2026-04-01T00:00:00Z" style="color:#8A8A8A;font-size:11px;white-space:nowrap;font-family:var(--font-mono)">Apr 1, 12:00 AM</td>
+        <td><span style="background:rgba(var(--primary-rgb),0.1);color:var(--primary);padding:2px 6px;border-radius:4px;font-size:11px">Pipeline</span></td>
+        <td>Initrode</td>
+        <td>Pending &rarr; Interview</td>
+      </tr></tbody>
+    </table>
+    
+  </div>
+  <script>
+  (function(){
+    document.querySelectorAll('#events-table .evt-time[data-ts]').forEach(function(cell){
+      var d=new Date(cell.getAttribute('data-ts'));
+      if(isNaN(d)){return;}
+      cell.textContent=d.toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    });
+  })();
+  </script>
+</div>

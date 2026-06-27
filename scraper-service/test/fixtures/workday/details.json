@@ -1,0 +1,15 @@
+{
+  "/job/Remote/Senior-DevOps-Engineer_R123": {
+    "jobPostingInfo": {
+      "jobDescription": "<p>Run &amp; scale the platform</p>",
+      "location": "Remote - US",
+      "additionalLocations": ["Remote - EU", ""]
+    }
+  },
+  "/job/SF/Platform-Engineer_R456": {
+    "jobPostingInfo": {
+      "jobDescription": "Build the platform",
+      "location": ""
+    }
+  }
+}

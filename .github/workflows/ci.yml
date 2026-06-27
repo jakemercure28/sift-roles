@@ -1,0 +1,106 @@
+name: CI
+
+# Complementary to test.yml. That workflow runs the Node/Python verify suite
+# (including the scraper-service typecheck and tests). This one fills the two
+# remaining gaps: the Go test suite, and a real multi-stage Docker build that
+# proves the go-backend binary stays statically linked.
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+  go-test-postgres:
+    # Second engine track: run the Postgres-gated dialect + tenant-isolation
+    # tests (internal/db/*_pg_test.go) against a real Postgres so the SQLite->
+    # Postgres rewriter can't regress unnoticed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: spike
+          POSTGRES_DB: jsa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d jsa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Test (Postgres track)
+        env:
+          JSA_PG_DSN: postgres://postgres:spike@localhost:5432/jsa?sslmode=disable
+        run: go test -count=1 ./internal/db/...
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The go-backend image asserts static linking inside its build
+      # (ldd "not a dynamic executable"), so a broken static build fails here.
+      - name: Build go-backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: go-backend.Dockerfile
+          tags: go-backend:ci
+          push: false
+          load: false
+          cache-from: type=gha,scope=go-backend
+          cache-to: type=gha,scope=go-backend,mode=max
+
+      - name: Build scraper-service image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scraper-service/Dockerfile
+          tags: scraper-service:ci
+          push: false
+          load: false
+          cache-from: type=gha,scope=scraper-service
+          cache-to: type=gha,scope=scraper-service,mode=max

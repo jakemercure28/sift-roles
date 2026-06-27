@@ -1,0 +1,28 @@
+[
+  { "legal": "By using the RemoteOK API you agree to the terms" },
+  {
+    "position": "Senior DevOps Engineer",
+    "company": "RemoteCo",
+    "apply_url": "https://boards.greenhouse.io/remoteco/jobs/99",
+    "url": "https://remoteok.com/remote-jobs/1",
+    "slug": "1",
+    "description": "<p>Run &amp; scale the platform</p>",
+    "location": "Worldwide",
+    "epoch": 1714000000
+  },
+  {
+    "position": "Platform Engineer",
+    "company": "Acme",
+    "url": "https://remoteok.com/remote-jobs/2",
+    "slug": "2",
+    "description": "Build the platform",
+    "epoch": 1714100000
+  },
+  {
+    "position": "Barista",
+    "company": "Cafe",
+    "url": "https://remoteok.com/remote-jobs/3",
+    "slug": "3",
+    "description": "Coffee"
+  }
+]

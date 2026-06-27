@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Senior DevOps Engineer",
+    "company": "acme",
+    "description": "Build & run platforms — CafÃ© culture. Ship grÃ¢ce Ã the team. AWS Kubernetes",
+    "direct_apply_url": "https://boards.greenhouse.io/acme/jobs/4001",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "",
+    "location": "Remote - US",
+    "posted_at": "2026-05-01T12:00:00-04:00"
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "globex",
+    "description": "Own the platform",
+    "direct_apply_url": "https://boards.greenhouse.io/globex/jobs/5001",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "",
+    "location": "Berlin | London",
+    "posted_at": "2026-04-15T09:30:00Z"
+  },
+  {
+    "title": "SRE",
+    "company": "globex",
+    "description": "Reliability & on-call",
+    "direct_apply_url": "https://boards.greenhouse.io/globex/jobs/5002",
+    "ats_platform_name": "Greenhouse",
+    "scraped_timestamp": "",
+    "location": "",
+    "posted_at": ""
+  }
+]

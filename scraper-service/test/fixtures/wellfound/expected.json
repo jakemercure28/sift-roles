@@ -1,0 +1,32 @@
+[
+  {
+    "title": "DevOps Engineer",
+    "company": "Acme",
+    "description": "Operate",
+    "direct_apply_url": "https://example.com/job/1",
+    "ats_platform_name": "Remotive",
+    "scraped_timestamp": "",
+    "location": "USA Only",
+    "posted_at": ""
+  },
+  {
+    "title": "Platform Engineer",
+    "company": "Globex",
+    "description": "Build",
+    "direct_apply_url": "https://example.com/job/2",
+    "ats_platform_name": "Remotive",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": ""
+  },
+  {
+    "title": "SRE",
+    "company": "Initech",
+    "description": "Reliability",
+    "direct_apply_url": "https://example.com/job/3",
+    "ats_platform_name": "Remotive",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": ""
+  }
+]
