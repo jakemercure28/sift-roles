@@ -27,6 +27,14 @@ func TestDeleteTenantWipesOnlyThatTenant(t *testing.T) {
 	if err := b.RecordAPICall("test-model"); err != nil {
 		t.Fatalf("record api call for user-b: %v", err)
 	}
+	// An event referencing user-b's job. events.job_id is a foreign key into
+	// jobs(id) (enforced by Postgres and by SQLite's foreign_keys pragma), so this
+	// is the row that makes deletion order matter: if DeleteTenant removed jobs
+	// before events, this FK would block the wipe and roll the whole txn back.
+	// Guards the regression that broke self-serve account deletion in prod.
+	if err := b.LogEvent("job-user-b", "stage_change", "", "applied"); err != nil {
+		t.Fatalf("log event for user-b: %v", err)
+	}
 
 	count := func(table, uid string) int {
 		t.Helper()

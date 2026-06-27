@@ -376,6 +376,7 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		srv.SetScrapeTriggerURL(cfg.ScrapeTriggerURL)
 		srv.SetScrapeSchedule(cfg.ScrapeSchedule)
 		srv.SetAuth(buildDashboardAuth(ctx, cfg, logger), cfg.SupabaseURL, cfg.SupabaseAnonKey)
+		srv.SetAuthAdminDSN(cfg.DatabaseURL)
 		srv.SetRateLimit(cfg.RateLimitPerMinute, cfg.RateLimitBurst)
 		// Fresh config per run so Sync now picks up credentials saved in the
 		// Settings modal without a restart.
@@ -449,6 +450,7 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		dash.SetScrapeSchedule(cfg.ScrapeSchedule)
 		dash.SetHostKeyConfigured(cfg.GeminiAPIKey != "")
 		dash.SetAuth(buildDashboardAuth(ctx, cfg, logger), cfg.SupabaseURL, cfg.SupabaseAnonKey)
+		dash.SetAuthAdminDSN(cfg.DatabaseURL)
 		dash.SetRateLimit(cfg.RateLimitPerMinute, cfg.RateLimitBurst)
 		// Fresh config per run so Sync now picks up credentials saved in the
 		// Settings modal without a restart.

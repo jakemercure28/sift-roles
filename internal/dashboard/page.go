@@ -104,8 +104,16 @@ func RenderPage(v PageView) string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ` + BrandFaviconLink() + `
+<link rel="apple-touch-icon" href="/public/icons/apple-touch-icon.png?v=1">
+<link rel="manifest" href="/public/manifest.json?v=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="` + BrandName + `">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161b22">
 <title>` + BrandName + `</title>
-<link rel="stylesheet" href="/public/dashboard.css?v=76">
+<link rel="stylesheet" href="/public/dashboard.css?v=77">
 <style id="theme-vars">` + RenderThemeCSS() + `</style>
 ` + pageThemePrepaint + `
 ` + pageChartLoader + `

@@ -4,8 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http:%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox=%220%200%2064%2064%22%20shape-rendering=%22crispEdges%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2212%22%20fill=%22%23f4f4f5%22%2F%3E%3Cpath%20d=%22M7%209h50v10H7zM13%2021h38v8h-6v7h-7v16H26V36h-7v-7h-6z%22%20fill=%22%2318181b%22%2F%3E%3Cpath%20d=%22M17%2013h7v3h-7zM29%2013h7v3h-7zM41%2013h7v3h-7zM24%2025h16v4H24z%22%20fill=%22%23f4f4f5%22%2F%3E%3C%2Fsvg%3E">
+<link rel="apple-touch-icon" href="/public/icons/apple-touch-icon.png?v=1">
+<link rel="manifest" href="/public/manifest.json?v=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Sift">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161b22">
 <title>Sift</title>
-<link rel="stylesheet" href="/public/dashboard.css?v=76">
+<link rel="stylesheet" href="/public/dashboard.css?v=77">
 <style id="theme-vars">:root {
   /* Surfaces */
   --bg-primary: #161B22;

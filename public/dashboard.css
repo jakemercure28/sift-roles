@@ -3337,6 +3337,29 @@ body.dashboard-loading #dashboard-main {
     text-align: left;
   }
 
+  /* Pipeline funnel: the desktop 5-column grid needs ~414px min and overflows a
+     phone, so stack the stages as full-width rows (label · number · bar) where
+     the dropoff still reads top-to-bottom. */
+  .analytics-report .an-funnel-cols {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .analytics-report .an-funnel-col {
+    display: grid;
+    grid-template-columns: 104px minmax(28px, auto) 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  .analytics-report .an-funnel-num {
+    margin-top: 0;
+    text-align: right;
+    font-size: 1rem;
+  }
+  .analytics-report .an-funnel-bar {
+    margin-top: 0;
+    min-width: 40px;
+  }
+
   .calibration-table {
     display: block;
     overflow-x: auto;

@@ -5,8 +5,16 @@ import "fmt"
 // tenantTables lists every table keyed or filtered by user_id. DeleteTenant wipes
 // all of a tenant's rows across them. Keep in sync with the schema baseline
 // (migrations/postgres/00001_baseline.sql, migrations/sqlite/00001_baseline.sql).
+//
+// ORDER MATTERS: jobs must come LAST. Several tables carry NO ACTION foreign keys
+// into jobs(id) — events.job_id, job_aliases.alternate_job_id/canonical_job_id,
+// rejection_email_log.matched_job_id — so deleting jobs while those rows still
+// reference it raises a constraint violation and the whole transaction rolls back.
+// Postgres (and SQLite with foreign_keys on) enforce this immediately; the children
+// must be deleted before the jobs they point at. A jobs-first order silently
+// "worked" only against a FK-disabled store, then broke self-serve account deletion
+// in prod for any tenant that had events ("could not delete account").
 var tenantTables = []string{
-	"jobs",
 	"metadata",
 	"api_usage",
 	"company_notes",
@@ -15,6 +23,7 @@ var tenantTables = []string{
 	"job_aliases",
 	"status_snapshots",
 	"ats_resolution_cache",
+	"jobs",
 }
 
 // DeleteTenant permanently deletes every row owned by this repo's tenant across

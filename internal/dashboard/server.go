@@ -65,6 +65,12 @@ type Server struct {
 	supabaseURL     string
 	supabaseAnonKey string
 
+	// authAdminDSN is the privileged (non-RLS) Postgres DSN used to delete a
+	// tenant's auth.users row on account deletion — the restricted serving role
+	// can't touch the auth schema. Hosted-only; empty on self-host. See
+	// handleDeleteAccount and db.DeleteAuthUser.
+	authAdminDSN string
+
 	// market memoizes rendered Market Research bodies per tenant. Held by pointer
 	// so the per-request Server clone (forRequest) shares one cache and stays
 	// copy-safe (no mutex value is copied).
@@ -160,6 +166,12 @@ func (s *Server) SetAuth(v middleware.Verifier, url, anonKey string) {
 	s.supabaseURL = url
 	s.supabaseAnonKey = anonKey
 }
+
+// SetAuthAdminDSN supplies the privileged (non-RLS) Postgres DSN used to delete a
+// tenant's auth.users login on account deletion. Hosted-only; pair it with SetAuth.
+// Leaving it unset disables the auth-row delete (data is still wiped, but the login
+// survives), so set it whenever hosted auth is enabled.
+func (s *Server) SetAuthAdminDSN(dsn string) { s.authAdminDSN = dsn }
 
 // SetRateLimit enables per-tenant throttling of the expensive authenticated
 // endpoints (market research, ask, scrape-now, profile refresh/extract). perMinute
@@ -404,9 +416,11 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 // mimeTypes mirrors the allow-list in dashboard.js: only these extensions are
 // served, everything else 404s.
 var mimeTypes = map[string]string{
-	".css": "text/css",
-	".js":  "application/javascript",
-	".pdf": "application/pdf",
+	".css":  "text/css",
+	".js":   "application/javascript",
+	".pdf":  "application/pdf",
+	".png":  "image/png",
+	".json": "application/json",
 }
 
 // handleStatic serves files under /public/ with the same caching contract as

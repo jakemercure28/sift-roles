@@ -86,8 +86,10 @@ services:
       SCORING_ENABLED: '1'
       # Score the backlog on boot (after the startup scrape) so freshly-scraped
       # jobs get scores immediately instead of sinking unscored until the first
-      # scoring cron tick.
-      SCORE_ON_START: '1'
+      # scoring cron tick. Defaults to off so a restart/deploy does not re-score
+      # the whole backlog (a real Gemini-spend cost); set SCORE_ON_START=1 in
+      # .env to opt back in.
+      SCORE_ON_START: '${SCORE_ON_START:-0}'
       # Public multi-tenant tier: every tenant scores on the shared host key, so
       # this caps how many host-key Gemini calls a SINGLE tenant may spend per day
       # — the per-user fairness cap that stops one signup draining the shared key
