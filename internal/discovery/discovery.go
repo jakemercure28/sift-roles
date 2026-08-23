@@ -27,13 +27,17 @@ const (
 	DefaultCandidateCount = 80
 	MinOutputTokens       = 2000
 	BootstrapThreshold    = 20
-	BootstrapPasses       = 5
+	// DefaultBootstrapPasses is how many Gemini passes a bootstrap tenant runs
+	// back-to-back. It used to be 5; with the shared registry (Common Crawl seed
+	// + URL harvest) plus the LLM-free Harvest carrying breadth, Gemini only
+	// fills niche gaps and 2 passes suffice.
+	DefaultBootstrapPasses = 2
 
 	boardTimeout = 10 * time.Second
 	concurrency  = 15
 )
 
-var apiPlatforms = []string{"greenhouse", "ashby", "lever"}
+var apiPlatforms = []string{"greenhouse", "ashby", "lever", "gem", "smartrecruiters"}
 
 // GeminiClient is the Gemini capability discovery needs. scorer.Client
 // satisfies it via CallGemini.
@@ -69,11 +73,17 @@ type Config struct {
 	DataDir        string
 	TTLHours       float64
 	CandidateCount int
-	Gemini         GeminiClient
-	HTTPClient     *http.Client
-	Registry       Registry
-	Now            func() time.Time
-	Log            *slog.Logger
+	// BootstrapPasses is how many Gemini passes a bootstrap tenant runs
+	// back-to-back. <= 0 falls back to DefaultBootstrapPasses.
+	BootstrapPasses int
+	Gemini          GeminiClient
+	HTTPClient      *http.Client
+	Registry        Registry
+	Now             func() time.Time
+	Log             *slog.Logger
+	// Postings lists a registry board's open posting titles for the harvester
+	// (Harvest). Nil defaults to a live HTTP lister; tests inject their own.
+	Postings PostingsLister
 }
 
 // Report is the summary returned by Run.
@@ -88,11 +98,13 @@ type Report struct {
 
 // Suggested is the persisted suggested-companies.json shape.
 type Suggested struct {
-	Greenhouse []string       `json:"greenhouse"`
-	Ashby      []string       `json:"ashby"`
-	Lever      []string       `json:"lever"`
-	Workday    []WorkdayEntry `json:"workday"`
-	UpdatedAt  *string        `json:"updatedAt"`
+	Greenhouse      []string       `json:"greenhouse"`
+	Ashby           []string       `json:"ashby"`
+	Lever           []string       `json:"lever"`
+	Workday         []WorkdayEntry `json:"workday"`
+	Gem             []string       `json:"gem"`
+	SmartRecruiters []string       `json:"smartrecruiters"`
+	UpdatedAt       *string        `json:"updatedAt"`
 }
 
 // WorkdayEntry identifies one Workday board.
@@ -114,13 +126,15 @@ type DiscoveryCandidate struct {
 
 // CompanyConfig is the subset of data/companies.json needed for discovery.
 type CompanyConfig struct {
-	SearchTerms []string       `json:"SEARCH_TERMS"`
-	Greenhouse  []string       `json:"GREENHOUSE_COMPANIES"`
-	Ashby       []string       `json:"ASHBY_COMPANIES"`
-	Lever       []string       `json:"LEVER_COMPANIES"`
-	Workable    []string       `json:"WORKABLE_COMPANIES"`
-	Rippling    []string       `json:"RIPPLING_COMPANIES"`
-	Workday     []WorkdayEntry `json:"WORKDAY_COMPANIES"`
+	SearchTerms     []string       `json:"SEARCH_TERMS"`
+	Greenhouse      []string       `json:"GREENHOUSE_COMPANIES"`
+	Ashby           []string       `json:"ASHBY_COMPANIES"`
+	Lever           []string       `json:"LEVER_COMPANIES"`
+	Workable        []string       `json:"WORKABLE_COMPANIES"`
+	Rippling        []string       `json:"RIPPLING_COMPANIES"`
+	Workday         []WorkdayEntry `json:"WORKDAY_COMPANIES"`
+	Gem             []string       `json:"GEM_COMPANIES"`
+	SmartRecruiters []string       `json:"SMARTRECRUITERS_COMPANIES"`
 }
 
 // HasCompanies reports whether any ATS company list is non-empty. A freshly
@@ -128,7 +142,8 @@ type CompanyConfig struct {
 // pre-scrape bootstrap decides whether discovery still needs to run for it.
 func (c CompanyConfig) HasCompanies() bool {
 	return len(c.Greenhouse) > 0 || len(c.Ashby) > 0 || len(c.Lever) > 0 ||
-		len(c.Workable) > 0 || len(c.Rippling) > 0 || len(c.Workday) > 0
+		len(c.Workable) > 0 || len(c.Rippling) > 0 || len(c.Workday) > 0 ||
+		len(c.Gem) > 0 || len(c.SmartRecruiters) > 0
 }
 
 type cacheState struct {
@@ -161,6 +176,12 @@ func LoadSuggested(dataDir string) Suggested {
 	if s.Workday == nil {
 		s.Workday = []WorkdayEntry{}
 	}
+	if s.Gem == nil {
+		s.Gem = []string{}
+	}
+	if s.SmartRecruiters == nil {
+		s.SmartRecruiters = []string{}
+	}
 	return s
 }
 
@@ -180,11 +201,21 @@ func SaveSuggested(dataDir string, s Suggested) error {
 
 func emptySuggested() Suggested {
 	return Suggested{
-		Greenhouse: []string{},
-		Ashby:      []string{},
-		Lever:      []string{},
-		Workday:    []WorkdayEntry{},
+		Greenhouse:      []string{},
+		Ashby:           []string{},
+		Lever:           []string{},
+		Workday:         []WorkdayEntry{},
+		Gem:             []string{},
+		SmartRecruiters: []string{},
 	}
+}
+
+// InBootstrap reports whether the tenant at dataDir is still in discovery
+// bootstrap (fewer than BootstrapThreshold verified boards). It is the same
+// signal Run uses to decide multi-pass discovery; callers use it to boost
+// first-run harvest limits.
+func InBootstrap(dataDir string) bool {
+	return len(AllSlugs(LoadSuggested(dataDir))) < BootstrapThreshold
 }
 
 // AllSlugs returns the verified board slugs counted toward discovery cache
@@ -209,6 +240,11 @@ func AllSlugs(s Suggested) map[string]bool {
 	for _, entry := range s.Workday {
 		if entry.Sub != "" {
 			out[entry.Sub] = true
+		}
+	}
+	for _, slug := range s.SmartRecruiters {
+		if slug != "" {
+			out[slug] = true
 		}
 	}
 	return out
@@ -246,6 +282,8 @@ func buildKnown(s Suggested) knownBoards {
 	index("greenhouse", s.Greenhouse)
 	index("ashby", s.Ashby)
 	index("lever", s.Lever)
+	index("gem", s.Gem)
+	index("smartrecruiters", s.SmartRecruiters)
 	for _, e := range s.Workday {
 		if key := WorkdayKey(e); key != "" {
 			k.workday[key] = e
@@ -493,11 +531,12 @@ func BuildPrompt(existingSlugs map[string]bool, searchTerms []string, resumeSnip
 	if len(searchTerms) > 0 {
 		searchSection = "Configured search terms:\n" + strings.Join(searchTerms, ", ") + "\n\n"
 	}
-	platformRule := "- Only use Greenhouse, Ashby, Lever, or Workday as the platform (these have public APIs)\n" +
+	platformRule := "- Only use Greenhouse, Ashby, Lever, SmartRecruiters, or Workday as the platform (these have public APIs)\n" +
 		"- For Greenhouse/Ashby/Lever: \"slug\" is the company's ATS board token (e.g. \"stripe\", \"cloudflare\", \"linear\")\n" +
+		"- For SmartRecruiters: \"slug\" is the company's exact SmartRecruiters identifier, the case-sensitive path in jobs.smartrecruiters.com/<slug> (e.g. \"Freshworks\", \"Visa\"); omit the company if you are unsure of its exact identifier\n" +
 		"- For Workday: set \"slug\" to the tenant subdomain AND set \"url\" to the full public job board URL, e.g. \"https://capitalone.wd12.myworkdayjobs.com/en-US/Capital_One\". The URL MUST contain \".wdN.myworkdayjobs.com\" and the real board path - do not invent it; omit the company if you are unsure of its exact Workday URL\n" +
 		"- Include large, established employers in this field, not only startups. Major companies, institutions, hospital systems, retailers, universities, and government agencies frequently post on Workday - prefer Workday for them and provide their full Workday board URL\n"
-	jsonShape := "[{\"name\":\"Company Name\",\"platform\":\"Greenhouse|Ashby|Lever|Workday\",\"slug\":\"board-slug\",\"url\":\"https://...myworkdayjobs.com/... (Workday only)\",\"rationale\":\"1 sentence\"}]\n\n"
+	jsonShape := "[{\"name\":\"Company Name\",\"platform\":\"Greenhouse|Ashby|Lever|Workday|Gem|SmartRecruiters\",\"slug\":\"board-slug\",\"url\":\"https://...myworkdayjobs.com/... (Workday only)\",\"rationale\":\"1 sentence\"}]\n\n"
 	return "You are helping a job seeker find companies that are actively hiring.\n\n" +
 		resumeSection +
 		searchSection +
@@ -573,7 +612,10 @@ func Run(ctx context.Context, cfg Config) (Report, error) {
 	}
 	passes := 1
 	if isBootstrap {
-		passes = BootstrapPasses
+		passes = cfg.BootstrapPasses
+		if passes <= 0 {
+			passes = DefaultBootstrapPasses
+		}
 	}
 	totalAdded := 0
 	for i := 0; i < passes; i++ {
@@ -611,6 +653,9 @@ func staticSlugSet(cfg CompanyConfig) map[string]bool {
 	}
 	for _, entry := range cfg.Workday {
 		out[SlugKey(entry.Sub)] = true
+	}
+	for _, slug := range cfg.SmartRecruiters {
+		out[SlugKey(slug)] = true
 	}
 	return out
 }
@@ -735,6 +780,16 @@ func runDiscoveryPass(ctx context.Context, cfg Config, suggested *Suggested, sta
 				suggested.Lever = append(suggested.Lever, c.Slug)
 				added++
 			}
+		case "gem":
+			if !slices.Contains(suggested.Gem, c.Slug) {
+				suggested.Gem = append(suggested.Gem, c.Slug)
+				added++
+			}
+		case "smartrecruiters":
+			if !slices.Contains(suggested.SmartRecruiters, c.Slug) {
+				suggested.SmartRecruiters = append(suggested.SmartRecruiters, c.Slug)
+				added++
+			}
 		case "workday":
 			if res.workdayEntry != nil {
 				key := WorkdayKey(*res.workdayEntry)
@@ -853,6 +908,17 @@ func isAPIPlatform(platform string) bool {
 }
 
 func boardExists(ctx context.Context, client *http.Client, platform, slug string) (bool, error) {
+	// Gem verifies via a POST to its public GraphQL endpoint, not a GET, so it
+	// gets its own path rather than a URL in the map below.
+	if strings.ToLower(platform) == "gem" {
+		return gemBoardExists(ctx, client, slug)
+	}
+	// SmartRecruiters answers HTTP 200 with totalFound:0 for an unknown company
+	// (not a 404), so a positive posting count is the existence signal, not the
+	// status code; it gets its own path rather than a URL in the map below.
+	if strings.ToLower(platform) == "smartrecruiters" {
+		return smartRecruitersBoardExists(ctx, client, slug)
+	}
 	urls := map[string]string{
 		"greenhouse": "https://boards-api.greenhouse.io/v1/boards/" + slug + "/jobs",
 		"ashby":      "https://api.ashbyhq.com/posting-api/job-board/" + slug,
@@ -877,6 +943,83 @@ func boardExists(ctx context.Context, client *http.Client, platform, slug string
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode >= 200 && resp.StatusCode < 300, nil
+}
+
+// gemBoardExists verifies a Gem board by its vanity slug through the public
+// GraphQL endpoint. An unknown slug returns HTTP 200 with jobBoardExternal:null
+// (not a 404), so the presence of that object, not the status code, is the
+// existence signal.
+func gemBoardExists(ctx context.Context, client *http.Client, slug string) (bool, error) {
+	const query = `query JobBoardList($boardId: String!) { jobBoardExternal(vanityUrlPath: $boardId) { teamDisplayName } }`
+	body, err := json.Marshal(map[string]any{
+		"operationName": "JobBoardList",
+		"variables":     map[string]string{"boardId": slug},
+		"query":         query,
+	})
+	if err != nil {
+		return false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://jobs.gem.com/api/public/graphql", bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return false, nil
+	}
+	var parsed struct {
+		Data struct {
+			JobBoardExternal *struct {
+				TeamDisplayName string `json:"teamDisplayName"`
+			} `json:"jobBoardExternal"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return false, nil
+	}
+	return parsed.Data.JobBoardExternal != nil, nil
+}
+
+// smartRecruitersBoardExists verifies a SmartRecruiters board by its company
+// identifier through the public Posting API. An unknown identifier returns HTTP
+// 200 with totalFound:0 (not a 404), so a positive posting count, not the status
+// code, is the existence signal.
+func smartRecruitersBoardExists(ctx context.Context, client *http.Client, slug string) (bool, error) {
+	url := "https://api.smartrecruiters.com/v1/companies/" + slug + "/postings?limit=1"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		io.Copy(io.Discard, resp.Body)
+		return false, nil
+	}
+	var parsed struct {
+		TotalFound int `json:"totalFound"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return false, nil
+	}
+	return parsed.TotalFound > 0, nil
 }
 
 // ParseWorkdayURL ports parseWorkdayUrl in scripts/discover-companies.js.

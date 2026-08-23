@@ -4,6 +4,8 @@ Sift is a private, local, AI-powered job-search engine. Self-host it and it runs
 
 It scrapes 11+ job boards (Greenhouse, Lever, Ashby, Workable, Workday, Wellfound, Built In, and more), scores every listing against your resume with Google's free Gemini API, and serves a dashboard at `http://localhost:3131` for review and pipeline tracking.
 
+> **Status (August 2026):** Sift ran for several months as a hosted multi-tenant SaaS at siftroles.com. It did its job, the person it was built for got hired through it, and the hosted service is now retired. Sift lives on here as a self-hostable open-source project. Everything the hosted service ran on, including the Kubernetes manifests, GitOps config, and observability stack, is published in this repo.
+
 ![Dashboard](docs/screenshots/dashboard.png)
 
 ## Features
@@ -17,12 +19,25 @@ It scrapes 11+ job boards (Greenhouse, Lever, Ashby, Workable, Workday, Wellfoun
 
 Final "applied" status is always set by you. The scraper never marks anything as applied.
 
+## Architecture
+
+The stack is a Go backend plus a small TypeScript scraper sidecar, built to run either as a single-user Compose stack on a laptop or as a multi-tenant SaaS on Kubernetes. Both modes share the same code.
+
+- **Go backend** (`cmd/`, `internal/`): dashboard, scoring orchestration, scraping for most ATS platforms, maintenance jobs, and Prometheus metrics. One binary.
+- **TypeScript scraper-service** (`scraper-service/`): the handful of platforms that need a JS runtime.
+- **Multi-tenant Postgres** (self-hosted Supabase) with row-level security, a cross-tenant `global_jobs` cache so each board is scraped once and distributed to every matching tenant, and a company registry of about 14,000 verified ATS boards seeded from Common Crawl and grown LLM-free by mining apply URLs.
+- **LLM scoring** with Gemini batch prompts at roughly $0.0001 per job, per-tenant daily quotas, token telemetry, and cost panels in Grafana.
+- **Deploys** via GitHub Actions on a self-hosted runner, a local container registry, and Argo CD syncing kustomize overlays onto k3s (`deploy/`). Staging auto-syncs, prod is gated on a manual sync.
+- **Observability** with kube-prometheus-stack, Loki, and Grafana Alloy (`deploy/k8s/monitoring/`), plus an earlier Compose-based stack (`observability/`). An experimental self-healing ops agent (`deploy/k8s/opsagent/`) reads alerts and proposes remediations with a single-shot LLM call.
+
+Deeper docs: [backend architecture](docs/backend-architecture.md), [database architecture](docs/database-architecture.md), [observability](docs/observability.md), [deploy pipeline](docs/deploy.md), and the [k8s/ThinkPad runbook](docs/DEPLOY-thinkpad.md).
+
 ## Quickstart (Mac)
 
 Open the **Terminal** app and paste in this one line, then press Return:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/job-search-automation/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/sift-roles/main/install.sh)"
 ```
 
 That is the whole thing. It installs everything it needs (developer tools,
@@ -43,8 +58,8 @@ Open **http://localhost:3131**. A setup wizard walks you through adding your Gem
 The one-liner above is Mac-only, but the app is just a Compose stack and runs anywhere with a Compose v2 runtime (OrbStack, Docker Desktop, colima). To set it up by hand:
 
 ```bash
-git clone https://github.com/jakemercure28/job-search-automation.git
-cd job-search-automation
+git clone https://github.com/jakemercure28/sift-roles.git
+cd sift-roles
 cp .env.example .env          # then add your free Gemini key
 ./scripts/setup.sh            # seeds data/ and .context/ from the shipped examples
 docker compose up -d --build
@@ -61,6 +76,7 @@ Everything is in `.env`. Common settings:
 | `GEMINI_API_KEY` | | **Required.** Free key from Google AI Studio. |
 | `GEMINI_RATE_DELAY_MS` | `5000` | Throttle between Gemini calls. Lower on a paid key. |
 | `GEMINI_HOST_PER_TENANT_DAILY_LIMIT` | `0` | Hosted mode per-tenant cap on shared host-key calls/day (fairness guardrail). |
+| `GEMINI_HOST_INACTIVE_DAILY_LIMIT` | `0` | Hosted mode daily cap for tenants the activity gate marks inactive. Without it, idle accounts spend the shared key across the day's many scoring passes. |
 | `GLOBAL_JOB_SEED_LIMIT` | `100` | Recent global job descriptions copied into a tenant queue before a user-triggered scrape. |
 | `LOCATION_FILTER` | | Comma-separated cities to allow. Empty = allow all. |
 | `LOCATION_BLOCKLIST` | | Comma-separated cities to drop. |
@@ -77,7 +93,7 @@ Docker) is running, pulls the latest version, and rebuilds. Your data and
 settings stay in place, and the dashboard reopens when it is done.
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/job-search-automation/main/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/sift-roles/main/install.sh)"
 ```
 
 **Developers** can update by hand instead, with any running Compose v2 engine

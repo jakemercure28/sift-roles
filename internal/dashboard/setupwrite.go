@@ -18,6 +18,7 @@ import (
 
 	"job-search-automation/internal/db"
 	"job-search-automation/internal/scorer"
+	"job-search-automation/internal/searchterms"
 )
 
 func readJSONBody(r *http.Request) (map[string]any, error) {
@@ -85,91 +86,32 @@ func buildSetupCompaniesJSON(searchTerms string, maxAgeDays *int) string {
 		}
 	}
 	profile := struct {
-		MaxAgeDays  int      `json:"MAX_AGE_DAYS"`
-		SearchTerms []string `json:"SEARCH_TERMS"`
-		Greenhouse  []string `json:"GREENHOUSE_COMPANIES"`
-		Lever       []string `json:"LEVER_COMPANIES"`
-		Workable    []string `json:"WORKABLE_COMPANIES"`
-		Ashby       []string `json:"ASHBY_COMPANIES"`
-		Workday     []any    `json:"WORKDAY_COMPANIES"`
-		Wellfound   []string `json:"WELLFOUND_ROLES"`
-		Rippling    []string `json:"RIPPLING_COMPANIES"`
+		MaxAgeDays      int      `json:"MAX_AGE_DAYS"`
+		SearchTerms     []string `json:"SEARCH_TERMS"`
+		Greenhouse      []string `json:"GREENHOUSE_COMPANIES"`
+		Lever           []string `json:"LEVER_COMPANIES"`
+		Workable        []string `json:"WORKABLE_COMPANIES"`
+		Ashby           []string `json:"ASHBY_COMPANIES"`
+		Workday         []any    `json:"WORKDAY_COMPANIES"`
+		Wellfound       []string `json:"WELLFOUND_ROLES"`
+		Rippling        []string `json:"RIPPLING_COMPANIES"`
+		Gem             []string `json:"GEM_COMPANIES"`
+		SmartRecruiters []string `json:"SMARTRECRUITERS_COMPANIES"`
 	}{
-		MaxAgeDays:  maxAge,
-		SearchTerms: terms,
-		Greenhouse:  []string{},
-		Lever:       []string{},
-		Workable:    []string{},
-		Ashby:       []string{},
-		Workday:     []any{},
-		Wellfound:   []string{},
-		Rippling:    []string{},
+		MaxAgeDays:      maxAge,
+		SearchTerms:     terms,
+		Greenhouse:      []string{},
+		Lever:           []string{},
+		Workable:        []string{},
+		Ashby:           []string{},
+		Workday:         []any{},
+		Wellfound:       []string{},
+		Rippling:        []string{},
+		Gem:             []string{},
+		SmartRecruiters: []string{},
 	}
 	raw, _ := json.MarshalIndent(profile, "", "  ")
 	return string(raw) + "\n"
-}
-
-var setupResumeTermLexicon = []string{
-	"software engineer", "devops", "sre", "platform engineer", "data engineer", "data analyst",
-	"product manager", "project manager", "program manager", "marketing", "sales", "customer success",
-	"operations", "recruiter", "human resources", "accountant", "financial analyst", "nurse", "teacher",
-	"merchandising", "merchandiser", "buyer", "planner", "retail", "store manager", "visual merchandising",
-}
-
-var setupRoleLineRe = regexp.MustCompile(`(?i)\b(engineer|developer|manager|director|analyst|associate|coordinator|specialist|designer|architect|consultant|administrator|operator|technician|nurse|teacher|accountant|recruiter|merchandis(?:er|ing)|buyer|planner|retail|sales|marketing|operations)\b`)
-
-func deriveSetupSearchTermsFromResume(resume string) []string {
-	resume = strings.TrimSpace(resume)
-	if resume == "" {
-		return nil
-	}
-	seen := map[string]bool{}
-	terms := []string{}
-	add := func(term string) {
-		term = normalizeSetupSearchTerm(term)
-		if len(term) < 3 || seen[term] {
-			return
-		}
-		seen[term] = true
-		terms = append(terms, term)
-	}
-	for _, line := range strings.Split(resume, "\n") {
-		line = strings.TrimSpace(strings.TrimLeft(line, "-* "))
-		if line == "" || len(line) > 90 || strings.HasSuffix(line, ":") || strings.HasSuffix(line, ".") {
-			continue
-		}
-		if !setupRoleLineRe.MatchString(line) {
-			continue
-		}
-		for _, sep := range []string{" | ", " - ", " -- ", " at ", " @ ", ","} {
-			if idx := strings.Index(strings.ToLower(line), sep); idx > 0 {
-				line = line[:idx]
-				break
-			}
-		}
-		add(line)
-		if len(terms) >= 8 {
-			return terms
-		}
-	}
-	lowerResume := strings.ToLower(resume)
-	for _, term := range setupResumeTermLexicon {
-		if strings.Contains(lowerResume, term) {
-			add(term)
-			if len(terms) >= 8 {
-				break
-			}
-		}
-	}
-	return terms
-}
-
-func normalizeSetupSearchTerm(term string) string {
-	term = strings.ToLower(strings.TrimSpace(term))
-	term = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(term, "")
-	term = regexp.MustCompile(`[^a-z0-9+.#/ -]+`).ReplaceAllString(term, " ")
-	term = regexp.MustCompile(`\s+`).ReplaceAllString(term, " ")
-	return strings.TrimSpace(term)
 }
 
 // extractPDFText sends a base64-encoded PDF to Gemini using the multimodal
@@ -258,13 +200,41 @@ func (s *Server) handleSetupResume(w http.ResponseWriter, r *http.Request) {
 		content = extracted
 	}
 
+	invalidated := int64(0)
 	if strings.TrimSpace(content) != "" {
 		if err := os.WriteFile(filepath.Join(s.dataDir, "resume.md"), []byte(content), 0o644); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// A new resume re-queues ONLY the high band (score >= rescore floor)
+		// for scoring under it. Everything else keeps its old score with the
+		// mismatched hash as the staleness marker (surfaced by the banner):
+		// users tweak resumes constantly, and nulling every pending score per
+		// upload re-spent the whole scoring budget each time. Rows without a
+		// stamp and acted-on rows (applied/archived/closed) are untouched.
+		if n, err := s.repo.RequeueStaleHighScores(scorer.HashResume(content), resumeRescoreMinScore()); err != nil {
+			s.log.Warn("stale-score requeue failed", "error", err)
+		} else if n > 0 {
+			invalidated = n
+			s.log.Info("resume change requeued high-band stale scores", "requeued", n)
+		}
+		// The process-lived Scorer caches the resume; without this, dashboard-
+		// initiated scoring keeps using the OLD resume until restart.
+		if rel, ok := s.rejection.(interface{ Reload() }); ok {
+			rel.Reload()
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rescoreQueued": invalidated})
+}
+
+// resumeRescoreMinScore is the stale-score band re-queued on resume upload
+// (RESUME_RESCORE_MIN_SCORE, default 6): high scores are what users act on, so
+// only they must be re-verified against the new resume immediately.
+func resumeRescoreMinScore() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("RESUME_RESCORE_MIN_SCORE"))); err == nil && v > 0 {
+		return v
+	}
+	return 6
 }
 
 func (s *Server) handleSetupProfile(w http.ResponseWriter, r *http.Request) {
@@ -288,7 +258,7 @@ func (s *Server) handleSetupProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(terms) == 0 {
-		terms = deriveSetupSearchTermsFromResume(resume)
+		terms = searchterms.FromResume(resume)
 	}
 	if len(terms) == 0 {
 		jsonError(w, http.StatusBadRequest, "Could not determine search terms from the resume. Add at least one target title or search term.")

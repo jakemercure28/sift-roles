@@ -260,3 +260,51 @@ func TestRunVerifiesAndSavesSuggestedCompanies(t *testing.T) {
 		t.Fatalf("static slug was added to suggested list: %#v", saved.Greenhouse)
 	}
 }
+
+// TestRunBootstrapHonorsConfiguredPasses guards the bootstrap-pass knob: a
+// tenant under the bootstrap threshold runs exactly Config.BootstrapPasses
+// Gemini passes (default DefaultBootstrapPasses when unset).
+func TestRunBootstrapHonorsConfiguredPasses(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured int
+		want       int
+	}{
+		{"explicit", 3, 3},
+		{"default", 0, DefaultBootstrapPasses},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeCompaniesJS(t, dir)
+			gemini := &fakeGemini{raw: `[]`}
+			report, err := Run(context.Background(), Config{
+				DataDir:         dir,
+				TTLHours:        DefaultTTLHours,
+				CandidateCount:  DefaultCandidateCount,
+				BootstrapPasses: tc.configured,
+				Gemini:          gemini,
+				Now:             func() time.Time { return time.Date(2026, 5, 7, 12, 0, 0, 0, time.UTC) },
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if report.Passes != tc.want || gemini.called != tc.want {
+				t.Fatalf("passes = %d, gemini calls = %d, want %d", report.Passes, gemini.called, tc.want)
+			}
+		})
+	}
+}
+
+func TestInBootstrap(t *testing.T) {
+	dir := t.TempDir()
+	if !InBootstrap(dir) {
+		t.Fatal("empty tenant dir should be in bootstrap")
+	}
+	updated := "2026-05-07T00:00:00.000Z"
+	if err := SaveSuggested(dir, seededSuggested(BootstrapThreshold, updated)); err != nil {
+		t.Fatalf("SaveSuggested: %v", err)
+	}
+	if InBootstrap(dir) {
+		t.Fatalf("tenant with %d boards should not be in bootstrap", BootstrapThreshold)
+	}
+}

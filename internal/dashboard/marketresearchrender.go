@@ -426,16 +426,24 @@ func renderReportMasthead(currentCount, allTimeCount int, cache *marketCache, ha
 	if cache != nil && cache.GeneratedAt > 0 {
 		runLabel = "Re-run analysis"
 	}
+	// When the masthead recommends a run (no cache, stale, or sample drift),
+	// the button gets the solid primary style; the muted archive style is
+	// reserved for a fresh cache, where it otherwise reads as disabled right
+	// next to "re-run recommended".
+	runClass := "btn-green"
+	if hasFreshCache {
+		runClass = "btn-archive"
+	}
 	return fmt.Sprintf(`
   <div class="report-masthead">
     <p class="report-meta">%s</p>
     <div class="report-masthead-actions">
       <form method="POST" action="/market-research" class="report-rerun-form" onsubmit="return mrRunSubmit(this)">
-        <button type="submit" class="btn btn-sm btn-archive">%s</button>
+        <button type="submit" class="btn btn-sm %s" title="Takes 30 to 60 seconds">%s</button>
       </form>
     </div>
   </div>
-  `, strings.Join(segs, " &middot; "), runLabel)
+  `, strings.Join(segs, " &middot; "), runClass, runLabel)
 }
 
 type marketRenderContext struct {

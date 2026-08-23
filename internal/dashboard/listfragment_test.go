@@ -116,18 +116,16 @@ func TestDashboardListSearchAndPaging(t *testing.T) {
 func TestDashboardListHeartbeatBanner(t *testing.T) {
 	ts, repo, conn := fragmentServer(t)
 	seedFullJob(t, conn, db.ListedJob{ID: "a", Title: "X", Company: "Y", Status: "pending", Score: ptr(8)})
-	// A recent successful heartbeat => folded into the title status line, with
-	// no banner in the main body (only error/stale states render a banner).
+	// A recent successful heartbeat renders no server-side status: scrape
+	// freshness lives only in the client-side scrape banner, so the title
+	// subtitle and main body stay clean (only error/stale states render a banner).
 	if err := repo.WriteHeartbeat("ok", 10, 3, ""); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 
 	f := getFragment(t, ts, "filter=all")
-	if !strings.Contains(f.TitleHTML, "last scrape") {
-		t.Fatalf("titleHtml missing heartbeat status:\n%s", f.TitleHTML)
-	}
-	if !strings.Contains(f.TitleHTML, "3 new") {
-		t.Fatal("title status line should show inserted count")
+	if strings.Contains(f.TitleHTML, "last scrape") {
+		t.Fatalf("titleHtml should not fold scrape freshness:\n%s", f.TitleHTML)
 	}
 	if strings.Contains(f.MainHTML, "Last scrape") {
 		t.Fatal("healthy heartbeat should no longer render a main-body banner")

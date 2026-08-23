@@ -36,6 +36,8 @@ export interface CompanyConfig {
   WORKABLE_COMPANIES: string[];
   WORKDAY_COMPANIES: WorkdayEntry[];
   RIPPLING_COMPANIES: string[];
+  GEM_COMPANIES: string[];
+  SMARTRECRUITERS_COMPANIES: string[];
   [key: string]: unknown;
 }
 
@@ -44,6 +46,8 @@ interface Suggested {
   ashby: string[];
   lever: string[];
   workday: WorkdayEntry[];
+  gem: string[];
+  smartrecruiters: string[];
 }
 
 // A Workday board is uniquely identified by its tenant AND board path: one tenant
@@ -67,9 +71,20 @@ function loadSuggested(profileDir: string): Suggested {
       ashby: Array.isArray(data.ashby) ? data.ashby : [],
       lever: Array.isArray(data.lever) ? data.lever : [],
       workday: Array.isArray(data.workday) ? data.workday : [],
+      gem: Array.isArray(data.gem) ? data.gem : [],
+      smartrecruiters: Array.isArray(data.smartrecruiters)
+        ? data.smartrecruiters
+        : [],
     };
   } catch {
-    return { greenhouse: [], ashby: [], lever: [], workday: [] };
+    return {
+      greenhouse: [],
+      ashby: [],
+      lever: [],
+      workday: [],
+      gem: [],
+      smartrecruiters: [],
+    };
   }
 }
 
@@ -148,6 +163,11 @@ export function companyConfig(): CompanyConfig {
     WORKDAY_COMPANIES: mergeWorkday(
       base.WORKDAY_COMPANIES || [],
       suggested.workday
+    ),
+    GEM_COMPANIES: addNew(base.GEM_COMPANIES || [], suggested.gem),
+    SMARTRECRUITERS_COMPANIES: addNew(
+      base.SMARTRECRUITERS_COMPANIES || [],
+      suggested.smartrecruiters
     ),
   };
   return cached;

@@ -12,8 +12,21 @@
 <meta name="apple-mobile-web-app-title" content="Sift">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161b22">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sift">
+<meta property="og:title" content="Sift, your job search sifted.">
+<meta property="og:description" content="Sift reads your resume and surfaces only the roles worth your time.">
+<meta property="og:url" content="https://app.siftroles.com">
+<meta property="og:image" content="https://siftroles.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Sift, your job search sifted.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sift, your job search sifted.">
+<meta name="twitter:description" content="Sift reads your resume and surfaces only the roles worth your time.">
+<meta name="twitter:image" content="https://siftroles.com/og.png">
 <title>Sift</title>
-<link rel="stylesheet" href="/public/dashboard.css?v=77">
+<link rel="stylesheet" href="/public/dashboard.css?v=80">
 <style id="theme-vars">:root {
   /* Surfaces */
   --bg-primary: #161B22;
@@ -82,6 +95,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #9C9C9C;
@@ -228,6 +243,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #4A4A4A;
@@ -374,6 +391,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #4A4A4A;
@@ -519,6 +538,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #9C9C9C;
@@ -859,10 +880,10 @@ window.loadDashboardChart = function(callback) {
 
 <script>window.__THEME__ = {"pipeline":{"":"#6B7280","applied":"#3E7BD6","phone_screen":"#6366F1","interview":"#0E9488","onsite":"#D08A2E","offer":"#2EA043","closed":"#8A8A8A","rejected":"#DC4B43","ghosted":"#6B7280"},"scores":{"good":"#9C9C9C","borderline":"#8A8A8A","weak":"#A8A8A8"},"primary":"#000000","accent":"#000000","success":"#2EA043","danger":"#DC4B43","warning":"#D08A2E","neutral":"#565656"};</script>
 <script defer src="/public/js/nav.js?v=11"></script>
-<script defer src="/public/js/ui.js?v=11"></script>
-<script defer src="/public/js/pipeline.js?v=2"></script>
+<script defer src="/public/js/ui.js?v=12"></script>
+<script defer src="/public/js/pipeline.js?v=3"></script>
 <script defer src="/public/js/wizard.js?v=9"></script>
 <script defer src="/public/js/settings.js?v=9"></script>
-<script defer src="/public/js/effects.js?v=13"></script>
+<script defer src="/public/js/effects.js?v=14"></script>
 </body>
 </html>

@@ -156,3 +156,36 @@ func TestSyncLeavesAmbiguousCompanyUnmatched(t *testing.T) {
 }
 
 func uint32Ptr(v uint32) *uint32 { return &v }
+
+// TestSyncSecondEmailForSameJobIgnored pins the matcher's mid-sweep
+// invalidation: after the first rejection is applied, a second rejection email
+// for the same company must see the refreshed sets and land as
+// ignored/already_rejected, not re-apply.
+func TestSyncSecondEmailForSameJobIgnored(t *testing.T) {
+	repo := newTestDB(t)
+	seedAppliedJob(t, repo, "job-1", "Acme", "Senior SRE")
+
+	first := Message{
+		UID: 11, Subject: "Acme application update", FromAddress: "recruiting@acme.test",
+		MessageID: "<msg-11@acme.test>", ReceivedAt: "2026-06-08T15:04:05Z",
+		Raw: "Thanks for your interest in Acme. Unfortunately, we decided not to move forward.",
+	}
+	second := first
+	second.UID = 12
+	second.MessageID = "<msg-12@acme.test>"
+
+	summary, err := Sync(context.Background(), repo, Config{
+		SkipTrash: true,
+		Fetcher: fakeFetcher{result: FetchResult{
+			UIDValidity: "777",
+			LastUID:     uint32Ptr(12),
+			Messages:    []Message{first, second},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if summary != (Summary{Fetched: 2, Candidates: 2, Applied: 1, Ignored: 1}) {
+		t.Fatalf("summary = %+v", summary)
+	}
+}

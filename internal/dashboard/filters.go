@@ -99,7 +99,6 @@ func renderLocationDropdown(prefs LocationPrefs, metros []metroOption) string {
   </div>`
 }
 
-
 func renderSortDropdown(filter, sortKey string, opts SearchOptions) string {
 	isDate := sortKey == "date"
 	label := "Sort: Score"
@@ -220,25 +219,9 @@ func renderPageStatusLine(segs []string, actionsHTML string) string {
 	return `<div class="content-sub page-status">` + strings.Join(segs, " · ") + actions + `</div>`
 }
 
-// heartbeatSegs returns the healthy-heartbeat status segments ("last scrape Xm
-// ago", "N new"). Error/stale states stay in the warning banner instead.
-func heartbeatSegs(hb *db.Heartbeat) []string {
-	if hb == nil || hb.Status == "error" || hoursSince(hb.LastSuccessAt) > scrapeStaleHours {
-		return nil
-	}
-	ago := timeAgo(hb.LastSuccessAt)
-	if ago == "" {
-		return nil
-	}
-	segs := []string{"last scrape " + ago}
-	if hb.Inserted != 0 {
-		segs = append(segs, itoa(hb.Inserted)+" new this scrape")
-	}
-	return segs
-}
-
-// renderDashboardTitle ports renderDashboardTitle, folding the healthy scraper
-// heartbeat into the one-line page status (shared page grammar).
+// renderDashboardTitle builds the page title plus the one-line count status.
+// Scrape freshness is intentionally omitted here: it lives in the dedicated
+// scrape banner below the header, so repeating it in the subtitle was redundant.
 func renderDashboardTitle(filter string, stats db.Stats, hb *db.Heartbeat) string {
 	def, ok := titleDefs[filter]
 	if !ok {
@@ -261,11 +244,6 @@ func renderDashboardTitle(filter string, stats db.Stats, hb *db.Heartbeat) strin
 		}
 	} else if def.key != "" {
 		segs = append(segs, itoa(statByKey(stats, def.key))+" "+def.noun)
-	}
-	// Scrape freshness belongs to the job inbox views only; on Applications,
-	// Interviews, Offers, and the report pages it is noise.
-	if filter == "not-applied" || filter == "all" {
-		segs = append(segs, heartbeatSegs(hb)...)
 	}
 	return `<h1 class="content-title">` + def.label + `</h1>` + renderPageStatusLine(segs, "")
 }

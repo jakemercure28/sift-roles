@@ -389,6 +389,10 @@ func detectAts(j Job) string {
 		return "lever"
 	case strings.Contains(p, "workday") || strings.Contains(u, "myworkdayjobs.com"):
 		return "workday"
+	case strings.Contains(p, "gem") || strings.Contains(u, "jobs.gem.com"):
+		return "gem"
+	case strings.Contains(p, "smartrecruiters") || strings.Contains(u, "smartrecruiters.com"):
+		return "smartrecruiters"
 	}
 	return ""
 }
@@ -451,6 +455,36 @@ func parseCompanyTagsSlice(raw []string) []string {
 
 func intPtrGt(score *int, n int) bool { return score != nil && *score > n }
 
+// emptyStateMessage picks copy for an empty list. A search miss keeps a
+// search-shaped message; otherwise each stage view explains what would put
+// jobs here, so an empty pipeline stage reads as guidance, not failure.
+func emptyStateMessage(filter string, searchOptions SearchOptions) string {
+	// MinScore defaults to 1 (see pageroute.go); only above that is it a
+	// user-applied score filter.
+	if searchOptions.Q != "" || searchOptions.MinScore > 1 {
+		return "No jobs match your search."
+	}
+	switch filter {
+	case "not-applied":
+		return "Nothing waiting for review. New jobs land here after each scrape."
+	case "applied":
+		return "No applications yet. Set a job's stage to Applied after you apply."
+	case "interviewing":
+		return "No interviews yet. Set an application's stage to Phone Screen when one is booked."
+	case "offers":
+		return "No offers yet. They will show up here when an application reaches Offer."
+	case "archived":
+		return "Nothing archived. Dismiss a listing with its x button to file it here."
+	case "rejected":
+		return "No rejections recorded. Applications marked Rejected end up here."
+	case "closed":
+		return "No closed listings. Jobs taken down by the employer end up here."
+	case "ghosted":
+		return "Nothing ghosted. Applications with no response can be marked Ghosted."
+	}
+	return "No jobs found for this filter."
+}
+
 // RenderJobTable ports renderJobTable. companyTags is keyed by lowercased company.
 func RenderJobTable(jobs []Job, appliedByCompany map[string]int, companyTags map[string][]string, filter, sortKey string, pagination *Pagination, searchOptions SearchOptions) string {
 	if filter == "" {
@@ -461,7 +495,7 @@ func RenderJobTable(jobs []Job, appliedByCompany map[string]int, companyTags map
 	}
 	if len(jobs) == 0 {
 		return `<div class="job-list-panel">` +
-			`<div class="empty">No jobs found for this filter.</div>` +
+			`<div class="empty">` + emptyStateMessage(filter, searchOptions) + `</div>` +
 			`</div>`
 	}
 
@@ -527,6 +561,17 @@ func renderJobCard(j Job, appliedByCompany map[string]int, companyTags map[strin
 		}
 		tagParts = append(tagParts, `<span class="complexity-badge rejected-date" title="Rejected on `+escapeHTML(d)+`">`+escapeHTML(d)+`</span>`)
 	}
+	// A NULL/empty archive_reason means the user archived the row themselves
+	// (see internal/db/archivereason.go), so only auto-archives get a badge. The
+	// status gate keeps a stale reason from showing if a row ever leaves
+	// archived without the column being cleared.
+	if j.Status == "archived" && j.ArchiveReason != "" {
+		lbl, ok := archiveReasonLabels[j.ArchiveReason]
+		if !ok {
+			lbl = j.ArchiveReason
+		}
+		tagParts = append(tagParts, `<span class="complexity-badge archive-reason" title="Archived automatically: `+escapeHTML(lbl)+`">`+escapeHTML(lbl)+`</span>`)
+	}
 	tagsHTML := ""
 	if len(tagParts) > 0 {
 		tagsHTML = `<div class="job-tags">` + strings.Join(tagParts, "") + `</div>`
@@ -537,7 +582,7 @@ func renderJobCard(j Job, appliedByCompany map[string]int, companyTags map[strin
 	atsName := detectAts(j)
 	atsHTML := ""
 	if atsName != "" {
-		atsHTML = `<span class="badge-ats badge-ats-` + atsName + `">` + atsName + `</span>`
+		atsHTML = `<span class="badge-ats badge-ats-` + atsName + `"><span class="badge-ats-label">via</span>` + atsName + `</span>`
 	}
 
 	cardExtra := ""
@@ -723,7 +768,7 @@ const jobCardFmt = `
           %s
         </div>
         <div class="job-col-actions">
-          <button class="btn-row-archive" onclick="archiveJob('%s', this)" title="Archive" aria-label="Archive job">%s</button>
+          <button class="btn-row-archive" onclick="archiveJob('%s', this)" title="Not interested (archive)" aria-label="Archive job, not interested">%s</button>
         </div>
       </div>
       %s
@@ -731,14 +776,18 @@ const jobCardFmt = `
 
 const pipelineSelectFmt = `<select class="pipeline-select" data-prev="%s" onchange="setPipeline('%s', this.value, this)" style="color:%s">
             <option value="" %s style="color:%s">Pending</option>
+            <optgroup label="Your stage">
             <option value="applied" %s style="color:%s">Applied</option>
             <option value="phone_screen" %s style="color:%s">Phone Screen</option>
             <option value="interview" %s style="color:%s">Interview</option>
             <option value="onsite" %s style="color:%s">Onsite</option>
             <option value="offer" %s style="color:%s">Offer</option>
+            </optgroup>
+            <optgroup label="Outcome from employer">
             <option value="closed" %s style="color:%s">Closed</option>
             <option value="rejected" %s style="color:%s">Rejected</option>
             <option value="ghosted" %s style="color:%s">Ghosted</option>
+            </optgroup>
           </select>`
 
 const paginationFmt = `<div class="job-pagination">

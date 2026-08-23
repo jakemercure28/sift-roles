@@ -15,19 +15,16 @@
 .env.local
 .env.selfhost.bak
 
-# --- Deploy / private infrastructure (ThinkPad self-hosted runner, /srv/jsa) ---
-.github/workflows/deploy.yml
-scripts/deploy.sh
+# --- Private ops scripts (backup paths, one-time migrations) ---
 scripts/backup-sensitive.sh
 scripts/backfill-events-from-sqlite.sh
-docker-compose.staging.yml
 
-# --- Observability stack (Grafana/Loki/Prometheus/Promtail for the hosted box) ---
-observability
-
-# --- Private deploy runbooks ---
-docs/DEPLOY-thinkpad.md
-docs/deploy.md
+# NOTE (2026-08-22 sunset): the hosted service is retired and the repo is now a
+# showcase, so the deploy/infra story ships publicly: .github/workflows/deploy.yml,
+# scripts/deploy.sh, docker-compose.staging.yml, observability/, deploy/ (k8s
+# manifests + Argo apps; secrets are SealedSecrets), and the deploy runbooks in
+# docs/. All were secret-scanned before un-ignoring; the only infra identifier
+# they carry is a Tailscale CGNAT address, unreachable outside the tailnet.
 
 # --- Local backup / scratch artifacts (accidental/tracked; never publish) ---
 .local-backups

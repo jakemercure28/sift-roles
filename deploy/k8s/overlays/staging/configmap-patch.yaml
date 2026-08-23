@@ -1,0 +1,28 @@
+# Staging values: the docker-compose.staging.yml quieting knobs (deploys must
+# not burn Gemini or hammer Supabase egress) plus the env-specific settings
+# from the box's /srv/jsa/staging/.env. Secrets are NOT here; they live in
+# the jsa-secrets SealedSecret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jsa-config
+data:
+  DASHBOARD_HOST: staging.siftroles.com
+  DASHBOARD_BASE_URL: https://staging.siftroles.com
+  SUPABASE_URL: https://auth-staging.siftroles.com
+
+  RLS_ENFORCE: 'true'
+  PREFILTER_LOCATION: '1'
+  GLOBAL_SCRAPE_ENABLED: '1'
+  EXTRACT_ENABLED: '1'
+  GEMINI_EXTRACT_DAILY_LIMIT: '60'
+  SCORING_BATCH_SIZE: '4'
+  SCORING_RESCORE_THRESHOLD: '5'
+
+  # Deploy quieting (port of docker-compose.staging.yml).
+  SCRAPE_ON_START: '0'
+  SCORE_ON_START: '0'
+  SCRAPE_SCHEDULE: '0 9 * * *'
+  METRICS_REFRESH_INTERVAL_MS: '3600000'
+  MARKET_WARM_INTERVAL_MS: '86400000'
+  MARKET_ALLTIME_WINDOW_DAYS: '90'

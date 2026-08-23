@@ -4,11 +4,29 @@ name: CI
 # (including the scraper-service typecheck and tests). This one fills the two
 # remaining gaps: the Go test suite, and a real multi-stage Docker build that
 # proves the go-backend binary stays statically linked.
+#
+# pull_request only: there's no branch protection on this repo (private, no
+# GitHub Pro), and dev/main only ever advance via squash-merge of an already
+# green PR, so a push-triggered re-run here would just re-test identical code
+# and burn Actions minutes for nothing. deploy.yml's own `gate` job still runs
+# go build+test on push, right before an actual deploy happens.
+#
+# self-hosted: this repo is private, so every GitHub-hosted minute is billed
+# against the account's 2,000/month and CI was the bulk of it (~5.5 min/run
+# across the three jobs below, docker-build alone ~2.8). The ThinkPad runner
+# that already serves deploy.yml is free and uncapped, so these jobs run there
+# instead. Trade-off: there is exactly ONE runner, so these jobs serialize with
+# each other and with deploys rather than running in parallel.
+#
+# paths-ignore: markdown is in .prettierignore and is not compiled, tested, or
+# baked into an image, so a docs-only change has nothing here to break. Do NOT
+# add observability/** — its dashboard JSON IS prettier-checked by test.yml.
 
 on:
   pull_request:
-  push:
-    branches: [dev, main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 permissions:
   contents: read
@@ -19,7 +37,7 @@ concurrency:
 
 jobs:
   go-test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thinkpad]
     timeout-minutes: 10
     steps:
       - name: Check out code
@@ -41,7 +59,7 @@ jobs:
     # Second engine track: run the Postgres-gated dialect + tenant-isolation
     # tests (internal/db/*_pg_test.go) against a real Postgres so the SQLite->
     # Postgres rewriter can't regress unnoticed.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thinkpad]
     timeout-minutes: 10
     services:
       postgres:
@@ -50,7 +68,13 @@ jobs:
           POSTGRES_PASSWORD: spike
           POSTGRES_DB: jsa
         ports:
-          - 5432:5432
+          # 55432, NOT 5432: this runner is the prod box. Real Postgres already
+          # holds 5432 (supabase-db-prod, on the Tailscale IP) and 5433
+          # (supabase-db staging). A service container publishing 0.0.0.0:5432
+          # cannot bind while any address holds that port, so the job failed
+          # with "port is already allocated" the moment prod PG was published
+          # for the k3s cutover. Keep CI on a port nothing else can claim.
+          - 55432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d jsa"
           --health-interval 5s
@@ -68,18 +92,33 @@ jobs:
 
       - name: Test (Postgres track)
         env:
-          JSA_PG_DSN: postgres://postgres:spike@localhost:5432/jsa?sslmode=disable
+          JSA_PG_DSN: postgres://postgres:spike@localhost:55432/jsa?sslmode=disable
         run: go test -count=1 ./internal/db/...
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thinkpad]
     timeout-minutes: 15
     steps:
       - name: Check out code
         uses: actions/checkout@v6
 
+      # A PERSISTENT builder, which is the whole point on a self-hosted box.
+      # By default this action generates a fresh builder name per run and
+      # removes it in its post step, so every run re-pulled golang:1.26 from
+      # scratch (~3 min). A stable name is reused if it already exists, and
+      # cleanup:false keeps it (plus its layer cache) between runs.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          name: jsa-ci
+          cleanup: false
+
+      # No type=gha cache here on purpose. Exporting mode=max to GitHub's cache
+      # took 9m24s of a 14m8s run: it uploads every layer from the ThinkPad over
+      # a residential uplink, and nearly tripped the 15m timeout. That cache paid
+      # for itself on GitHub-hosted runners (datacenter-to-datacenter) but is
+      # pure overhead here. The persistent builder above caches locally instead,
+      # at no network cost.
 
       # The go-backend image asserts static linking inside its build
       # (ldd "not a dynamic executable"), so a broken static build fails here.
@@ -91,8 +130,6 @@ jobs:
           tags: go-backend:ci
           push: false
           load: false
-          cache-from: type=gha,scope=go-backend
-          cache-to: type=gha,scope=go-backend,mode=max
 
       - name: Build scraper-service image
         uses: docker/build-push-action@v6
@@ -102,5 +139,9 @@ jobs:
           tags: scraper-service:ci
           push: false
           load: false
-          cache-from: type=gha,scope=scraper-service
-          cache-to: type=gha,scope=scraper-service,mode=max
+
+      # The builder now outlives the job, so its cache would grow forever.
+      # Scoped to the jsa-ci builder, so this cannot touch prod's images.
+      - name: Bound the build cache
+        if: always()
+        run: docker buildx prune --builder jsa-ci --force --filter until=168h || true

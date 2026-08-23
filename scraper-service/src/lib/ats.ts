@@ -28,6 +28,13 @@ const ATS_PATTERNS: { platform: string; re: RegExp }[] = [
   },
   // https://ats.rippling.com/{company}/jobs/...
   { platform: 'Rippling', re: /^https?:\/\/ats\.rippling\.com\/([^/?#]+)\// },
+  // https://jobs.gem.com/{company}/...
+  { platform: 'Gem', re: /^https?:\/\/jobs\.gem\.com\/([^/?#]+)/ },
+  // https://jobs.smartrecruiters.com/{company}/... (also careers.smartrecruiters.com)
+  {
+    platform: 'SmartRecruiters',
+    re: /^https?:\/\/(?:jobs|careers)\.smartrecruiters\.com\/([^/?#]+)/,
+  },
 ];
 
 export function detectAts(url: string): AtsMatch | null {

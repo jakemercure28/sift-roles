@@ -71,6 +71,21 @@ func TestPostgresSmoke(t *testing.T) {
 		t.Fatalf("UpdateJobScore: %v", err)
 	}
 
+	// rescore selection + unarchive. The years predicate is LOWER(...) LIKE
+	// rather than a regex precisely so it means the same thing here as on
+	// SQLite (PG's LIKE is case-sensitive; SQLite's is not), and the IN-list
+	// placeholders have to survive the ?-to-$N rebind. Prod is Postgres and
+	// `server rescore` is aimed at it, so both run against the real backend.
+	if _, err := repo.JobsToRescore([]string{lead.ID}, false, 0, 10); err != nil {
+		t.Fatalf("JobsToRescore(ids): %v", err)
+	}
+	if _, err := repo.JobsToRescore(nil, true, 4, 10); err != nil {
+		t.Fatalf("JobsToRescore(years): %v", err)
+	}
+	if _, err := repo.UnarchiveAboveThreshold([]string{lead.ID}, 4); err != nil {
+		t.Fatalf("UnarchiveAboveThreshold: %v", err)
+	}
+
 	// api_usage upsert (date('now','localtime'), ON CONFLICT(date,model)).
 	for i := 0; i < 2; i++ {
 		if err := repo.RecordAPICall("gemini-flash"); err != nil {

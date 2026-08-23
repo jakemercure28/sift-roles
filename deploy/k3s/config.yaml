@@ -1,0 +1,32 @@
+# k3s server config. Source of truth lives in the repo; copy manually to
+# /etc/rancher/k3s/config.yaml on the ThinkPad (see docs/k8s-migration.md).
+#
+# Installed version is PINNED: v1.36.2+k3s1
+# Upgrade = deliberate re-run of the installer with a new pin, never "latest":
+#   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.36.2+k3s1" sh -s - server
+
+node-name: thinkpad
+
+# Tailscale IP so kubectl works from the Mac over the tailnet.
+# This IP is load-bearing (also used by EndpointSlices and DB publishes);
+# it is pinned in the tailnet admin console. If the device ever re-registers,
+# grep deploy/ for the old IP.
+tls-san:
+  - 100.87.101.41
+
+write-kubeconfig-mode: '0640'
+
+# PVCs (local-path provisioner) live on the big disk under /srv, next to the
+# other jsa state, so backup scripts have one root to care about.
+default-local-storage-path: /srv/jsa/k3s-storage
+
+kubelet-arg:
+  # The box is shared with docker compose stacks and personal services, so
+  # keep eviction as an OOM firewall but less twitchy than the defaults
+  # (default nodefs threshold is 10% free, too aggressive on a 937G disk).
+  - 'eviction-hard=memory.available<200Mi,nodefs.available<5%'
+  - 'eviction-minimum-reclaim=memory.available=100Mi'
+  # k3s containerd has its own image store (duplicates Docker's); GC it
+  # earlier than the 85/80 defaults to keep disk pressure away.
+  - 'image-gc-high-threshold=70'
+  - 'image-gc-low-threshold=60'

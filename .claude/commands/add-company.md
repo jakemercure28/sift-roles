@@ -1,5 +1,5 @@
 ---
-description: Add specific companies to the job-search pipeline by finding and verifying their ATS board (Greenhouse/Ashby/Lever/Workday). Usage: /add-company [company name(s) or a careers/board URL]
+description: Add specific companies to the job-search pipeline by finding and verifying their ATS board (Greenhouse/Ashby/Lever/Gem/SmartRecruiters/Workday). Usage: /add-company [company name(s) or a careers/board URL]
 allowed-tools: Bash, Read, WebSearch, WebFetch
 ---
 

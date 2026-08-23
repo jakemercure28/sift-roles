@@ -1,0 +1,21 @@
+# App-of-apps root. Applied by hand ONCE after the helm install
+# (kubectl apply -n argocd -f deploy/argocd/apps/root.yaml); from then on
+# every Application in deploy/argocd/apps/ is managed declaratively.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:jakemercure28/job-search-automation-private.git
+    targetRevision: dev
+    path: deploy/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

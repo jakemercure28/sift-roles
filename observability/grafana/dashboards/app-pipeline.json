@@ -1,0 +1,1164 @@
+{
+  "uid": "jsa-app-pipeline",
+  "title": "Sift \u2014 App & Pipeline",
+  "tags": ["sift", "app"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Env",
+        "type": "custom",
+        "query": "prod,staging",
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        },
+        "options": [
+          {
+            "text": "prod",
+            "value": "prod",
+            "selected": true
+          },
+          {
+            "text": "staging",
+            "value": "staging",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 400,
+      "type": "row",
+      "title": "At a glance",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 200,
+      "type": "stat",
+      "title": "Active users (7d)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_active_users{env=\"$env\", window=\"7d\"})"
+        }
+      ],
+      "description": "Distinct HUMANS: tenants who opened their dashboard in the last 7 days. This window gates paid scoring; everyone else only gets the free keep-warm trickle."
+    },
+    {
+      "id": 301,
+      "type": "stat",
+      "title": "Unscored jobs: active users",
+      "description": "Count of JOBS (not users) still waiting for a score and owned by the handful of tenants who opened their dashboard in the last 7 days. This is the only queue paid batch scoring drains, so it should fall toward zero within a day of batches applying.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2000
+              },
+              {
+                "color": "red",
+                "value": 10000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(jsa_jobs_pending_unscored{env=\"$env\",activity=\"active\"}) or vector(0)"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 4,
+        "y": 1
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Unscored jobs: total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 9,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(jsa_jobs_pending_unscored{env=\"$env\"})"
+        }
+      ],
+      "description": "Count of JOBS (not users) waiting for a score across all tenants. The vast majority belongs to inactive tenants and is deliberately parked on the free keep-warm path, so a large number here is normal. The active-users panel to the left is the one that must trend to zero."
+    },
+    {
+      "id": 303,
+      "type": "stat",
+      "title": "Est. paid Gemini spend (24h)",
+      "description": "Estimated dollars billed to the paid overflow key in the last 24h, computed from token counters at flash-lite list prices: sync $0.10/M input + $0.40/M output, batch at half of both. The free key costs $0 and is excluded. Prices are hardcoded in this query; update them if Google reprices.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "currencyUSD",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(\n  (sum(increase(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation=\"score_batch_async\",kind=\"prompt\"}[24h])) or vector(0)) * 0.05\n+ (sum(increase(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation=\"score_batch_async\",kind=~\"candidates|thoughts\"}[24h])) or vector(0)) * 0.20\n+ (sum(increase(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation!=\"score_batch_async\",kind=\"prompt\"}[24h])) or vector(0)) * 0.10\n+ (sum(increase(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation!=\"score_batch_async\",kind=~\"candidates|thoughts\"}[24h])) or vector(0)) * 0.40\n) / 1e6"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      }
+    },
+    {
+      "id": 314,
+      "type": "stat",
+      "title": "Paid key 429s (24h)",
+      "description": "Requests the paid key REJECTED in the last 24h. Near zero is healthy. A wall of thousands means the key is refusing everything: monthly spend cap hit or prepay credits empty, fix at ai.studio/spend. Confirmed signature: batch submits fail, spend reads $0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(jsa_gemini_requests_total{env=\"$env\",key=\"overflow\",status=\"429\"}[24h])) or vector(0)"
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      }
+    },
+    {
+      "id": 401,
+      "type": "row",
+      "title": "Gemini spend & scoring",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "panels": []
+    },
+    {
+      "id": 311,
+      "type": "timeseries",
+      "title": "Paid spend rate ($/hour)",
+      "description": "Dollar burn per hour on the paid key, split by path. Batch is billed at 50% off list; sync spillover pays full price, so a tall sync line is the expensive way to score. Batch tokens are counted when results are applied, so batch spend lands in steps, not smoothly. Prices hardcoded in the queries.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "axisSoftMax": 1,
+            "lineWidth": 2
+          },
+          "unit": "currencyUSD",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "((sum(rate(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation=\"score_batch_async\",kind=\"prompt\"}[15m])) or vector(0)) * 0.05 + (sum(rate(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation=\"score_batch_async\",kind=~\"candidates|thoughts\"}[15m])) or vector(0)) * 0.20) * 3600 / 1e6",
+          "legendFormat": "batch (50% off)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "((sum(rate(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation!=\"score_batch_async\",kind=\"prompt\"}[15m])) or vector(0)) * 0.10 + (sum(rate(jsa_gemini_tokens_total{env=\"$env\",key=\"overflow\",operation!=\"score_batch_async\",kind=~\"candidates|thoughts\"}[15m])) or vector(0)) * 0.40) * 3600 / 1e6",
+          "legendFormat": "sync spillover (full price)"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 113,
+      "type": "timeseries",
+      "title": "429 rejections by operation (per min)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (operation) (rate(jsa_gemini_requests_total{env=\"$env\",status=\"429\"}[15m]) * 60)",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "description": "Requests rejected with HTTP 429. Spikes are rate limits or billing: a sustained wall of score_batch_submit 429s means the paid key is out of prepay credits (fix at ai.studio/projects).",
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Sync jobs scored per minute",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(jsa_jobs_scored_total{env=\"$env\"}[10m]) * 60)",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "description": "Jobs the sync scorer finished, ok vs failed. Batch results do not appear here; see the batch panels below.",
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 321,
+      "type": "timeseries",
+      "title": "Unscored jobs by tenant",
+      "description": "Each tenant's queue of jobs waiting for a score, labeled with the activity verdict. Watch for an active tenant's line climbing while batches are in flight: that means submits are not keeping up with scrape inflow.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (user, activity) (jsa_jobs_pending_unscored{env=\"$env\"})",
+          "legendFormat": "{{user}} ({{activity}})"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            "renamePattern": "$1\u2026"
+          }
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 210,
+      "type": "stat",
+      "title": "Batches in flight",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Scoring batches sitting at Google awaiting results. Bounded by BATCH_API_MAX_OPEN_BATCHES (4). Pinned at the cap with no applies means the poller is stuck or batches are expiring.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 4
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_score_batches_open{env=\"$env\"})",
+          "legendFormat": "open"
+        }
+      ]
+    },
+    {
+      "id": 211,
+      "type": "stat",
+      "title": "Batch jobs submitted today",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Jobs shipped to the Batch API this UTC day, bounded by BATCH_API_DAILY_JOB_LIMIT (6000). This is the paid-spend throttle.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5000
+              },
+              {
+                "color": "red",
+                "value": 6000
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_score_batch_jobs_today{env=\"$env\"})",
+          "legendFormat": "submitted"
+        }
+      ]
+    },
+    {
+      "id": 212,
+      "type": "stat",
+      "title": "Batch results applied today",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Batch results that came back from Google and were applied to jobs today. Lags 'submitted' by Google's processing time, usually minutes to hours.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_gemini_batch_daily_usage{env=\"$env\"})",
+          "legendFormat": "ledgered"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Sync calls today (all tenants)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_gemini_host_daily_usage{env=\"$env\"})"
+        }
+      ],
+      "description": "Sync scoring calls ledgered today across every tenant on the shared host key (both API keys). This is the daily-quota enforcement counter. Batch calls are ledgered separately under the batch model."
+    },
+    {
+      "id": 403,
+      "type": "row",
+      "title": "Scrape \u2192 Distribute pipeline",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "panels": []
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Scrape cycles per hour (ok vs error)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short",
+          "min": 0,
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (increase(jsa_scrape_cycles_total{env=\"$env\"}[1h]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "description": "Scrape-insert cycles completed in the trailing hour, by result. The steady ok line is the pipeline heartbeat; any error line means a cycle died (check the logs dashboard)."
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Scrape cycle duration p50/p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum(rate(jsa_scrape_cycle_duration_seconds_bucket{env=\"$env\"}[30m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(jsa_scrape_cycle_duration_seconds_bucket{env=\"$env\"}[30m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "description": "How long a full scrape cycle takes. The budget is 60 minutes with 15 reserved for distribution, so p95 hugging ~45m means board fetches are consuming the entire scrape budget."
+    },
+    {
+      "id": 205,
+      "type": "timeseries",
+      "title": "Board fetches incomplete (429/blocked)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Companies whose board fetch came back incomplete (rate-limited, WAF, truncated) in the last pass. SmartRecruiters and Workday throttle us; sustained growth degrades close-detection and freshness.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "jsa_global_board_incomplete{env=\"$env\"}",
+          "legendFormat": "{{platform}}"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 206,
+      "type": "timeseries",
+      "title": "Distribution staleness by tenant (minutes)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Minutes since distribution last ran for each tenant. Cycles are scheduled every 3 hours, but a long board scrape skips the next tick, so lines saw-toothing up to ~6 hours is normal. Everyone climbing past ~7 hours means cycles are dying; one tenant climbing alone is starvation.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "m",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 420
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(time() - jsa_tenant_last_distribution_timestamp_seconds{env=\"$env\"}) / 60",
+          "legendFormat": "{{user}}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            "renamePattern": "$1\u2026"
+          }
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 208,
+      "type": "stat",
+      "title": "Board union size",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Distinct boards the last global pass set out to scrape: the coverage target. Tracks registry growth.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "jsa_global_board_union_size{env=\"$env\"}",
+          "legendFormat": "union"
+        }
+      ]
+    },
+    {
+      "id": 209,
+      "type": "stat",
+      "title": "Board scrapes truncated (24h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Global passes in the last 24h that ran out of scrape budget before fetching every board. Should be 0; sustained nonzero means the board union has outgrown the cycle window.",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "increase(jsa_global_board_scrape_truncated_total{env=\"$env\"}[24h])",
+          "legendFormat": "truncated"
+        }
+      ]
+    },
+    {
+      "id": 404,
+      "type": "row",
+      "title": "Web app & users",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Dashboard latency p95 by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(jsa_http_request_duration_seconds_bucket{env=\"$env\"}[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "description": "Slowest-5% response time per route. If these jump while backend load is flat, suspect the cloudflared tunnel (restart it on the thinkpad) before blaming the app.",
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 202,
+      "type": "timeseries",
+      "title": "Active users by window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_active_users{env=\"$env\", window=\"1d\"})",
+          "legendFormat": "1d"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_active_users{env=\"$env\", window=\"7d\"})",
+          "legendFormat": "7d"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(jsa_active_users{env=\"$env\", window=\"30d\"})",
+          "legendFormat": "30d"
+        }
+      ],
+      "description": "Engagement trend across 1/7/30-day windows. The 7d line is what gates paid scoring: tenants outside it go to the free keep-warm path."
+    }
+  ]
+}

@@ -118,6 +118,28 @@ func (r *Repository) DedupExistingJobs() (DedupResult, error) {
 	return res, nil
 }
 
+// ArchiveStaleUnscored archives pending, never-scored jobs whose posting is
+// older than `days`. Old unscored rows are almost always filled or ghost
+// listings by the time scoring quota reaches them, so burying them keeps the
+// per-tenant Gemini budget pointed at fresh listings. posted_at is
+// scraper-sourced TEXT and can hold junk like "Posted 6 Days Ago"; julianday()
+// yields NULL for those (the Postgres rewrite shape-guards the cast the same
+// way), so the age check falls back to first_seen_at. Rows where both are
+// NULL/junk are left alone. Returns the number archived.
+func (r *Repository) ArchiveStaleUnscored(days int) (int64, error) {
+	res, err := r.exec(`
+		UPDATE jobs
+		SET status = 'archived', archive_reason = '`+ArchiveReasonStaleUnscored+`', updated_at = datetime('now')
+		WHERE status = 'pending' AND score IS NULL AND user_id = ?
+		  AND COALESCE(julianday(posted_at), julianday(first_seen_at)) < julianday('now') - ?`,
+		r.userID, days,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // AutoGhostStale marks applied jobs with no progress for more than `days` as
 // ghosted and logs a stage_change event for each, ported from
 // scripts/auto-ghost.js. Returns the number ghosted.

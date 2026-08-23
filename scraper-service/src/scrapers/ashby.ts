@@ -6,6 +6,7 @@
  */
 import { stripHtml } from '../lib/html.js';
 import { scrapeCompanies } from '../lib/companies.js';
+import type { ScrapeCompaniesOptions } from '../lib/companies.js';
 import { makeJobLead } from '../lib/joblead.js';
 import { companyConfig, MAX_DESCRIPTION_LENGTH } from '../lib/config.js';
 import type { JobLead } from '../types.js';
@@ -40,9 +41,16 @@ interface AshbyJob {
   publishedAt?: string;
 }
 
-export async function scrapeAshby(): Promise<JobLead[]> {
-  return scrapeCompanies<AshbyJob>({
-    companies: companyConfig().ASHBY_COMPANIES,
+/**
+ * The ashby fetch/parse/map config for an explicit company list. Exported so
+ * board mode scrapes arbitrary registry boards with the exact same mapping
+ * (and therefore identical derived job ids) as the per-tenant path.
+ */
+export function ashbyOptions(
+  companies: string[]
+): ScrapeCompaniesOptions<AshbyJob> {
+  return {
+    companies,
     platform: 'ashby',
     buildUrl: (company) =>
       `https://api.ashbyhq.com/posting-api/job-board/${company}?includeCompensation=true`,
@@ -96,5 +104,11 @@ export async function scrapeAshby(): Promise<JobLead[]> {
         postedAt: job.updatedAt || job.publishedAt || '',
       });
     },
-  });
+  };
+}
+
+export async function scrapeAshby(): Promise<JobLead[]> {
+  return scrapeCompanies<AshbyJob>(
+    ashbyOptions(companyConfig().ASHBY_COMPANIES)
+  );
 }

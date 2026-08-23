@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,6 +57,21 @@ func TestAutoCloseEligibility(t *testing.T) {
 			},
 			want: &Eligibility{Platform: "Ashby", Slug: "helion", JobID: "6b2ee1c2-509e-4433-9a60-3f79d7dfcd42"},
 		},
+		{
+			name: "gem",
+			job: db.CloseCheckJob{
+				ID: "abc123", Platform: "Gem",
+				URL: "https://jobs.gem.com/blaze-ai/am9icG9zdDrbWxqD1cCdIRnDvOLv7Nux",
+			},
+			want: &Eligibility{Platform: "Gem", Slug: "blaze-ai", JobID: "am9icG9zdDrbWxqD1cCdIRnDvOLv7Nux"},
+		},
+		{
+			name: "gem wrong host skipped",
+			job: db.CloseCheckJob{
+				ID: "abc123", Platform: "Gem",
+				URL: "https://blaze.ai/careers/am9icG9zdDrbWxqD1cCdIRnDvOLv7Nux",
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +120,44 @@ func TestCheckGreenhouse(t *testing.T) {
 			}, &seen)
 			got, err := CheckJob(context.Background(), fetch, db.CloseCheckJob{
 				ID: "greenhouse-123", Platform: "Greenhouse", URL: "https://boards.greenhouse.io/acme/jobs/123",
-			}, map[string]map[string]bool{})
+			}, NewCache())
+			if err != nil {
+				t.Fatalf("CheckJob: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheckGem verifies the probe hits the posting's own apply page (not the
+// GraphQL board-list API), since Gem's API can report a board's postings as
+// live after the board's frontend route itself has been retired (blaze-ai and
+// arlo, 2026-07-10: GraphQL 200s with the old postings while every apply page
+// under that slug 404s).
+func TestCheckGem(t *testing.T) {
+	cases := []struct {
+		name string
+		res  *HTTPResult
+		want string
+	}{
+		{"404 closes", &HTTPResult{StatusCode: 404}, "closed"},
+		{"410 closes", &HTTPResult{StatusCode: 410}, "closed"},
+		{"429 stays open", &HTTPResult{StatusCode: 429}, "open"},
+		{"200 open", &HTTPResult{StatusCode: 200}, "open"},
+		{"network skip", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen []string
+			fetch := mapFetcher(map[string]*HTTPResult{
+				"https://jobs.gem.com/blaze-ai/am9icG9zdDrbWxqD1cCdIRnDvOLv7Nux": tc.res,
+			}, &seen)
+			got, err := CheckJob(context.Background(), fetch, db.CloseCheckJob{
+				ID: "abc123", Platform: "Gem",
+				URL: "https://jobs.gem.com/blaze-ai/am9icG9zdDrbWxqD1cCdIRnDvOLv7Nux",
+			}, NewCache())
 			if err != nil {
 				t.Fatalf("CheckJob: %v", err)
 			}
@@ -126,7 +179,7 @@ func TestCheckAshbyUsesBoardMembership(t *testing.T) {
 	}, &seen)
 	got, err := CheckJob(context.Background(), fetch, db.CloseCheckJob{
 		ID: "ashby-" + id, Platform: "Ashby", URL: "https://jobs.ashbyhq.com/helion/" + id,
-	}, map[string]map[string]bool{})
+	}, NewCache())
 	if err != nil {
 		t.Fatalf("CheckJob: %v", err)
 	}
@@ -223,5 +276,60 @@ func TestRunContinuesPastProbeError(t *testing.T) {
 	}
 	if len(closed) != 1 {
 		t.Fatalf("closed rows = %d, want 1 (the 404 job closed despite the earlier error)", len(closed))
+	}
+}
+
+// TestSharedCacheDedupesProbesAcrossRuns models the per-sweep cache: two Run
+// calls (two tenants holding the same postings) share one Cache, so the second
+// run must reuse the first run's verdicts and Ashby board snapshot instead of
+// re-probing, while still closing its own tenant's rows.
+func TestSharedCacheDedupesProbesAcrossRuns(t *testing.T) {
+	const ashbyID = "6b2ee1c2-509e-4433-9a60-3f79d7dfcd42"
+	newTenantRepo := func() *db.Repository {
+		repo := newRepo(t)
+		if _, err := repo.InsertScrapedLead(testLead("greenhouse-124", "Greenhouse", "https://boards.greenhouse.io/acme/jobs/124")); err != nil {
+			t.Fatalf("insert greenhouse: %v", err)
+		}
+		if _, err := repo.InsertScrapedLead(testLead("ashby-"+ashbyID, "Ashby", "https://jobs.ashbyhq.com/helion/"+ashbyID)); err != nil {
+			t.Fatalf("insert ashby: %v", err)
+		}
+		return repo
+	}
+
+	var mu sync.Mutex
+	var seen []string
+	fetch := func(ctx context.Context, rawURL string) (*HTTPResult, error) {
+		mu.Lock()
+		seen = append(seen, rawURL)
+		mu.Unlock()
+		if strings.Contains(rawURL, "greenhouse") {
+			return &HTTPResult{StatusCode: 404}, nil
+		}
+		return &HTTPResult{StatusCode: 200, Body: []byte(`{"jobs":[{"id":"other"}]}`)}, nil
+	}
+
+	cache := NewCache()
+	for tenant := 0; tenant < 2; tenant++ {
+		repo := newTenantRepo()
+		got, err := Run(context.Background(), repo, Config{Fetch: fetch, Delay: time.Nanosecond, Cache: cache})
+		if err != nil {
+			t.Fatalf("Run tenant %d: %v", tenant, err)
+		}
+		if got.Closed != 2 {
+			t.Fatalf("tenant %d closed = %d, want 2", tenant, got.Closed)
+		}
+		closed, err := repo.FilteredJobs("closed", "")
+		if err != nil {
+			t.Fatalf("FilteredJobs tenant %d: %v", tenant, err)
+		}
+		if len(closed) != 2 {
+			t.Fatalf("tenant %d closed rows = %d, want 2", tenant, len(closed))
+		}
+	}
+
+	// One Greenhouse probe + one Ashby board fetch total: the second tenant's
+	// run must be served entirely from the shared cache.
+	if len(seen) != 2 {
+		t.Fatalf("HTTP fetches = %d (%v), want 2", len(seen), seen)
 	}
 }

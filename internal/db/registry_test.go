@@ -18,6 +18,8 @@ func TestCompanyRegistryRoundTrip(t *testing.T) {
 	boards := []discovery.VerifiedBoard{
 		{Platform: "greenhouse", Slug: "warbyparker"},
 		{Platform: "lever", Slug: "linear"},
+		{Platform: "gem", Slug: "nominal"},
+		{Platform: "smartrecruiters", Slug: "Freshworks"},
 		{Platform: "workday", Workday: &discovery.WorkdayEntry{Sub: "capitalone", WD: 12, Board: "Capital_One", Label: "Capital One"}},
 	}
 	if err := reg.Upsert(ctx, boards); err != nil {
@@ -33,6 +35,12 @@ func TestCompanyRegistryRoundTrip(t *testing.T) {
 	}
 	if !slices.Contains(known.Lever, "linear") {
 		t.Fatalf("lever = %#v, want linear", known.Lever)
+	}
+	if !slices.Contains(known.Gem, "nominal") {
+		t.Fatalf("gem = %#v, want nominal", known.Gem)
+	}
+	if !slices.Contains(known.SmartRecruiters, "Freshworks") {
+		t.Fatalf("smartrecruiters = %#v, want Freshworks", known.SmartRecruiters)
 	}
 	if len(known.Workday) != 1 || discovery.WorkdayKey(known.Workday[0]) != "capitalone/Capital_One" {
 		t.Fatalf("workday = %+v, want capitalone/Capital_One", known.Workday)
@@ -103,5 +111,27 @@ func TestCompanyRegistryStaleExcluded(t *testing.T) {
 	}
 	if slices.Contains(known.Greenhouse, "staleco") {
 		t.Fatalf("greenhouse = %#v, stale board should be excluded", known.Greenhouse)
+	}
+}
+
+// CountRegistryBoardsByPlatform tallies every row per platform, regardless of
+// freshness (the gauge reports inventory, not adoptability).
+func TestCountRegistryBoardsByPlatform(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CompanyRegistry().Upsert(ctx, []discovery.VerifiedBoard{
+		{Platform: "greenhouse", Slug: "acme"},
+		{Platform: "greenhouse", Slug: "globex"},
+		{Platform: "ashby", Slug: "initech"},
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	counts, err := repo.CountRegistryBoardsByPlatform()
+	if err != nil {
+		t.Fatalf("CountRegistryBoardsByPlatform: %v", err)
+	}
+	if counts["greenhouse"] != 2 || counts["ashby"] != 1 {
+		t.Fatalf("counts = %#v, want greenhouse=2 ashby=1", counts)
 	}
 }

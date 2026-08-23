@@ -13,12 +13,16 @@ type CloseCheckJob struct {
 }
 
 // CloseCheckJobs returns active rows eligible for source-ATS closure probing,
-// matching scripts/check-closed.js.
+// matching scripts/check-closed.js. Applied/responded rows are excluded: once a
+// job is in the human-controlled pipeline (applied through offer all carry
+// status='applied'), a public posting coming down must not auto-close the row
+// out from under an in-flight application or interview. The probe only exists to
+// declutter unapplied listings from the review queue.
 func (r *Repository) CloseCheckJobs() ([]CloseCheckJob, error) {
 	rows, err := r.query(`
 		SELECT id, company, title, platform, url, stage
 		FROM jobs
-		WHERE status != 'archived'
+		WHERE status NOT IN ('archived', 'applied', 'responded')
 			AND (stage IS NULL OR stage NOT IN ('closed', 'rejected', 'offer'))
 			AND user_id = ?
 		ORDER BY platform, company`, r.userID)

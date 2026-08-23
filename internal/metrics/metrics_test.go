@@ -33,13 +33,14 @@ func TestHandlerExposesRuntimeAndCustomSeries(t *testing.T) {
 	ObserveATSResolution("unsupported", "Built In", "unsupported")
 	ObserveATSResolution("canonicalized", "Built In", "Workday")
 	ObserveScoringPass(5, 1, 3*time.Second)
-	ObserveGeminiRequest("score_batch", "ok", "200", 800*time.Millisecond)
-	ObserveGeminiTokens("score_batch", 1200, 700, 90, 1290)
+	ObserveGeminiRequest("score_batch", "ok", "200", "primary", 800*time.Millisecond)
+	ObserveGeminiTokens("score_batch", "overflow", 1200, 700, 90, 45, 1290)
 	SetGeminiUsage("local", 42)
 	SetGeminiHostUsage(100)
 	SetGeminiTokenUsage("local", 1200, 700, 90, 1290)
 	SetGeminiHostTokenUsage(2400, 1400, 180, 2580)
-	SetJobsPending("local", 7)
+	SetJobsPending("local", 7, false)
+	SetJobsPending("local", 7, true) // flip must retire the inactive series
 	ObserveHTTP("GET /healthz", http.MethodGet, "200", 5*time.Millisecond)
 	ObserveDashboardFragment("all", "total", "paged", 20*time.Millisecond)
 
@@ -55,20 +56,25 @@ func TestHandlerExposesRuntimeAndCustomSeries(t *testing.T) {
 		`jsa_ats_resolutions_total{action="canonicalized",from_platform="Built In",to_platform="Workday"}`,
 		`jsa_jobs_scored_total{result="ok"}`,
 		`jsa_jobs_scored_total{result="failed"}`,
-		`jsa_gemini_requests_total{operation="score_batch",result="ok",status="200"}`,
-		`jsa_gemini_tokens_total{kind="prompt",operation="score_batch"}`,
-		`jsa_gemini_tokens_total{kind="cached_prompt",operation="score_batch"}`,
-		`jsa_gemini_request_duration_seconds_bucket{operation="score_batch",result="ok",status="200"`,
+		`jsa_gemini_requests_total{key="primary",operation="score_batch",result="ok",status="200"}`,
+		`jsa_gemini_tokens_total{key="overflow",kind="prompt",operation="score_batch"}`,
+		`jsa_gemini_tokens_total{key="overflow",kind="cached_prompt",operation="score_batch"}`,
+		`jsa_gemini_tokens_total{key="overflow",kind="thoughts",operation="score_batch"}`,
+		`jsa_gemini_request_duration_seconds_bucket{key="primary",operation="score_batch",result="ok",status="200"`,
 		`jsa_gemini_daily_usage{user="local"}`,
 		"jsa_gemini_host_daily_usage",
 		`jsa_gemini_daily_tokens{kind="total",user="local"}`,
 		`jsa_gemini_host_daily_tokens{kind="total"}`,
-		`jsa_jobs_pending_unscored{user="local"}`,
+		`jsa_jobs_pending_unscored{activity="active",user="local"}`,
 		"jsa_http_request_duration_seconds",
 		`jsa_dashboard_fragment_duration_seconds_bucket{cache="paged",filter="all",phase="total"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics exposition missing %q", want)
 		}
+	}
+
+	if strings.Contains(body, `jsa_jobs_pending_unscored{activity="inactive",user="local"}`) {
+		t.Error("stale inactive backlog series survived an activity flip")
 	}
 }

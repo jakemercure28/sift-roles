@@ -1,0 +1,22 @@
+# Replaces the compose Prometheus `scraper-service` static_configs job.
+# Serves jsa_scraper_* plus the default Node process metrics on the same port
+# the app itself is served from. See go-backend/servicemonitor.yaml for why
+# env is derived from the namespace.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: scraper-service
+  labels:
+    app: scraper-service
+spec:
+  selector:
+    matchLabels:
+      app: scraper-service
+  endpoints:
+    - port: http
+      interval: 15s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          regex: 'jsa-(.*)'
+          targetLabel: env
+          replacement: '$1'

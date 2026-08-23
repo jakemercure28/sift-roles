@@ -15,17 +15,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"job-search-automation/internal/discovery"
 )
 
 const (
-	defaultTTL     = 23 * time.Hour
-	defaultDelay   = 120 * time.Millisecond
-	maxAttempts    = 3
-	retryBaseDelay = 750 * time.Millisecond
-	retryMaxDelay  = 2500 * time.Millisecond
+	defaultTTL         = 23 * time.Hour
+	defaultDelay       = 120 * time.Millisecond
+	defaultConcurrency = 6
+	maxAttempts        = 3
+	retryBaseDelay     = 750 * time.Millisecond
+	retryMaxDelay      = 2500 * time.Millisecond
 )
 
 // Config controls one slug-health run.
@@ -37,6 +40,9 @@ type Config struct {
 	HTTPClient *http.Client
 	Now        func() time.Time
 	Log        *slog.Logger
+	// Concurrency bounds the worker pool per ATS batch. Batches are per-host,
+	// so this also caps in-flight requests against any one ATS API.
+	Concurrency int
 
 	// Test hooks.
 	Delay time.Duration
@@ -105,6 +111,9 @@ func Run(ctx context.Context, cfg Config) (Summary, error) {
 	}
 	if cfg.Delay == 0 {
 		cfg.Delay = defaultDelay
+	}
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = defaultConcurrency
 	}
 	if cfg.TTL == 0 {
 		cfg.TTL = defaultTTL
@@ -233,11 +242,50 @@ func workdayBatch(values []discovery.WorkdayEntry) batch {
 	return batch{name: "Workday", items: items}
 }
 
+// runBatch checks a batch's items through a bounded worker pool. Each worker
+// keeps cfg.Delay between its own items, so per-host pacing survives and the
+// aggregate rate scales with cfg.Concurrency instead of running one request at
+// a time. Results land in a slice indexed by item so counts and issue order
+// stay deterministic.
 func runBatch(ctx context.Context, cfg Config, b batch) (Counts, []Issue, error) {
+	workers := cfg.Concurrency
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > len(b.items) {
+		workers = len(b.items)
+	}
+	results := make([]checkResult, len(b.items))
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ctx.Err() == nil {
+				i := int(next.Add(1)) - 1
+				if i >= len(b.items) {
+					return
+				}
+				results[i] = runCheckWithRetries(ctx, cfg, b.items[i])
+				if cfg.Delay > 0 {
+					select {
+					case <-time.After(cfg.Delay):
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return Counts{}, nil, err
+	}
+
 	var counts Counts
 	var issues []Issue
-	for _, item := range b.items {
-		result := runCheckWithRetries(ctx, cfg, item)
+	for i, result := range results {
 		switch result.Result {
 		case "ok":
 			counts.OK++
@@ -245,20 +293,13 @@ func runBatch(ctx context.Context, cfg Config, b batch) (Counts, []Issue, error)
 			counts.Empty++
 		case "blocked":
 			counts.Blocked++
-			issues = append(issues, issueEntry(b.name, item.label, result))
+			issues = append(issues, issueEntry(b.name, b.items[i].label, result))
 		case "transient":
 			counts.Transient++
-			issues = append(issues, issueEntry(b.name, item.label, result))
+			issues = append(issues, issueEntry(b.name, b.items[i].label, result))
 		default:
 			counts.Broken++
-			issues = append(issues, issueEntry(b.name, item.label, result))
-		}
-		if cfg.Delay > 0 {
-			select {
-			case <-time.After(cfg.Delay):
-			case <-ctx.Done():
-				return Counts{}, nil, ctx.Err()
-			}
+			issues = append(issues, issueEntry(b.name, b.items[i].label, result))
 		}
 	}
 	return counts, issues, nil
@@ -405,7 +446,7 @@ func checkRippling(ctx context.Context, cfg Config, v any) checkResult {
 	if res.Result != "" {
 		return res
 	}
-	match := regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">([\s\S]*?)</script>`).FindStringSubmatch(raw)
+	match := ripplingNextDataRe.FindStringSubmatch(raw)
 	if len(match) < 2 {
 		return checkResult{Result: "broken", Note: "Missing Rippling job data", Status: res.Status, URL: u}
 	}
@@ -416,6 +457,20 @@ func checkRippling(ctx context.Context, cfg Config, v any) checkResult {
 	count := countRipplingJobs(data)
 	return countResult(count, res.Status, u)
 }
+
+// maxBodyBytes caps how much of a response doRequest buffers. Real boards
+// legitimately blow past small caps (OpenAI's Ashby posting JSON is >11MB),
+// and a truncated read used to fail JSON parsing and misclassify a live board
+// as broken with HTTP 200; a 2xx body that still exceeds this cap now
+// classifies as ok (uncounted) instead of being parsed. A var so tests can
+// lower it.
+var maxBodyBytes int64 = 32 << 20
+
+var (
+	ripplingNextDataRe = regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">([\s\S]*?)</script>`)
+	transientErrRe     = regexp.MustCompile(`timeout|abort|dns|enotfound|eai_again|etimedout|econnreset|fetch failed|network`)
+	blockedTextRe      = regexp.MustCompile(`cloudflare|cf-ray|rate.?limit|too many requests|captcha|bot.?detect|access denied|akamai|perimeterx|datadome`)
+)
 
 type rawResult struct {
 	checkResult
@@ -451,10 +506,18 @@ func doRequest(ctx context.Context, cfg Config, method, u string, body io.Reader
 		return nil, checkResult{Result: result, Note: failureNote(0, err.Error(), result), Error: err.Error(), URL: u}
 	}
 	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if readErr != nil {
 		result := classifyFailure(resp.StatusCode, readErr.Error(), "", nil)
 		return raw, checkResult{Result: result, Note: failureNote(resp.StatusCode, readErr.Error(), result), Status: resp.StatusCode, Error: readErr.Error(), URL: u}
+	}
+	if int64(len(raw)) > maxBodyBytes {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			// A board serving more postings JSON than the cap is definitively
+			// live; skip counting rather than parse a truncated body as broken.
+			return nil, checkResult{Result: "ok", Note: "body exceeds buffer cap; board assumed live", Status: resp.StatusCode, URL: u}
+		}
+		raw = raw[:maxBodyBytes]
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		headers := map[string]string{
@@ -482,7 +545,7 @@ func classifyFailure(status int, errText, text string, headers map[string]string
 		return "transient"
 	}
 	normalized := strings.ToLower(errText)
-	if status == 0 || regexp.MustCompile(`timeout|abort|dns|enotfound|eai_again|etimedout|econnreset|fetch failed|network`).MatchString(normalized) {
+	if status == 0 || transientErrRe.MatchString(normalized) {
 		return "transient"
 	}
 	return "broken"
@@ -496,7 +559,7 @@ func isBlockedResponse(status int, text string, headers map[string]string) bool 
 	}
 	haystack := strings.ToLower(strings.Join(parts, " "))
 	return status == http.StatusTooManyRequests ||
-		regexp.MustCompile(`cloudflare|cf-ray|rate.?limit|too many requests|captcha|bot.?detect|access denied|akamai|perimeterx|datadome`).MatchString(haystack)
+		blockedTextRe.MatchString(haystack)
 }
 
 func failureNote(status int, errText, category string) string {

@@ -1,0 +1,13 @@
+# Postgres lives OUTSIDE the cluster (self-hosted Supabase on docker
+# compose, permanently). This selector-less Service gives pods a stable
+# in-cluster DNS name; the per-overlay EndpointSlice points it at the host's
+# Tailscale IP and the env's published port (staging :5433, prod :5432).
+# DSNs in jsa-secrets use host `supabase-db` in both envs.
+# (ExternalName cannot target a bare IP, hence Service + EndpointSlice.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-db
+spec:
+  ports:
+    - port: 5432

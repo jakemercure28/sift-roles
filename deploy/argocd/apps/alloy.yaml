@@ -1,0 +1,58 @@
+# Grafana Alloy: ships k3s pod logs to the compose Loki.
+#
+# Phase 6 moved staging to pods, and promtail only tails Docker containers, so
+# staging's logs vanished from Grafana. Alloy covers the cluster; promtail
+# keeps covering Docker. Two shippers, ONE Loki, one datasource, mirroring the
+# metrics remote_write.
+#
+# Promtail is EOL and is deliberately NOT rewritten here: it dies with the
+# compose stack at Phase 8, when Alloy takes over everything. Rewriting it now
+# would risk prod's log pipeline for no functional gain.
+#
+# The config is NOT inlined here. The chart passes `configMap.content` through
+# Helm's `tpl`, which then tries to evaluate the Alloy config AS A HELM
+# TEMPLATE -- and the level-mapping stage is full of Go template syntax
+# ({{- if eq .Value "10" -}}), so rendering dies with
+# `unexpected "\" in operand`. Note `alloy fmt` and `alloy validate` both pass
+# on that config: the failure is purely in Helm's tpl layer. So the config
+# lives in deploy/k8s/monitoring/alloy-config.alloy, becomes a ConfigMap via
+# kustomize (monitoring-config app), and is referenced here by name.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.10.1
+    helm:
+      values: |
+        controller:
+          type: daemonset
+
+        alloy:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 100Mi
+            limits:
+              memory: 256Mi
+
+          # Consume the kustomize-managed ConfigMap; never let the chart tpl
+          # our config (see the header comment).
+          configMap:
+            create: false
+            name: alloy-config
+            key: config.alloy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

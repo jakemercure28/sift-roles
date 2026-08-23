@@ -6,6 +6,7 @@
  */
 import { stripHtml } from '../lib/html.js';
 import { scrapeCompanies } from '../lib/companies.js';
+import type { ScrapeCompaniesOptions } from '../lib/companies.js';
 import { makeJobLead } from '../lib/joblead.js';
 import { companyConfig } from '../lib/config.js';
 import type { JobLead } from '../types.js';
@@ -26,9 +27,16 @@ interface LeverJob {
   createdAt?: number;
 }
 
-export async function scrapeLever(): Promise<JobLead[]> {
-  return scrapeCompanies<LeverJob>({
-    companies: companyConfig().LEVER_COMPANIES,
+/**
+ * The lever fetch/parse/map config for an explicit company list. Exported so
+ * board mode scrapes arbitrary registry boards with the exact same mapping
+ * (and therefore identical derived job ids) as the per-tenant path.
+ */
+export function leverOptions(
+  companies: string[]
+): ScrapeCompaniesOptions<LeverJob> {
+  return {
+    companies,
     platform: 'lever',
     buildUrl: (company) =>
       `https://api.lever.co/v0/postings/${company}?mode=json`,
@@ -61,5 +69,11 @@ export async function scrapeLever(): Promise<JobLead[]> {
           : '',
       });
     },
-  });
+  };
+}
+
+export async function scrapeLever(): Promise<JobLead[]> {
+  return scrapeCompanies<LeverJob>(
+    leverOptions(companyConfig().LEVER_COMPANIES)
+  );
 }

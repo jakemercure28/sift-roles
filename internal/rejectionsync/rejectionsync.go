@@ -165,12 +165,13 @@ func sweepMailbox(ctx context.Context, repo *db.Repository, mailbox, prefix stri
 		return Summary{}, err
 	}
 	summary := Summary{Fetched: len(result.Messages)}
+	jobs := newMatcher(repo)
 	for _, message := range result.Messages {
 		if !IsRejectionEmail(message) {
 			continue
 		}
 		summary.Candidates++
-		match, err := MatchRejectionEmail(repo, message)
+		match, err := jobs.match(message)
 		if err != nil {
 			return Summary{}, err
 		}
@@ -190,6 +191,9 @@ func sweepMailbox(ctx context.Context, repo *db.Repository, mailbox, prefix stri
 		switch applied.status {
 		case "applied":
 			summary.Applied++
+			// The job just moved to the rejected set; reload before the next
+			// candidate so a second email for it matches as already rejected.
+			jobs.invalidate()
 		case "dry_run":
 			summary.DryRun++
 		case "ignored":
@@ -414,8 +418,37 @@ func nonEmpty(groups ...[]string) []string {
 	return out
 }
 
+// Decode/normalize helpers below run per message part (and NormalizeText runs
+// O(messages x jobs x terms) via hasTerm), so their patterns are compiled once
+// here instead of per call.
+var (
+	softLineBreakRe    = regexp.MustCompile(`=\r?\n`)
+	mimeBoundaryRe     = regexp.MustCompile(`(?m)\r?\n--[^\r\n]*`)
+	textContentTypeRe  = regexp.MustCompile(`(?i)Content-Type:\s*text/(?:plain|html)\b`)
+	headerBodySplitRe  = regexp.MustCompile(`\r?\n\r?\n`)
+	headerUnfoldRe     = regexp.MustCompile(`\r?\n[\t ]+`)
+	charsetRe          = regexp.MustCompile(`(?i)\bcharset\s*=\s*"?([^";\s]+)"?`)
+	base64JunkRe       = regexp.MustCompile(`(?i)[^a-z0-9+/=]`)
+	htmlTagRe          = regexp.MustCompile(`<[^>]+>`)
+	multiSpaceRe       = regexp.MustCompile(`\s{2,}`)
+	nonAlnumRe         = regexp.MustCompile(`[^a-z0-9]+`)
+	linkRe             = regexp.MustCompile(`https?://[^\s"'<>]+`)
+	htmlEntityReplacer = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&apos;", "'")
+)
+
+// headerRes precompiles the header patterns getHeader is actually called with;
+// an unknown name falls back to compiling on the fly.
+var headerRes = map[string]*regexp.Regexp{
+	"Content-Type":              headerRe("Content-Type"),
+	"Content-Transfer-Encoding": headerRe("Content-Transfer-Encoding"),
+}
+
+func headerRe(name string) *regexp.Regexp {
+	return regexp.MustCompile(`(?im)^[\t ]*` + regexp.QuoteMeta(name) + `:\s*([^\r\n]*(?:\r?\n[\t ][^\r\n]*)*)`)
+}
+
 func decodeQuotedPrintable(input string) string {
-	normalized := regexp.MustCompile(`=\r?\n`).ReplaceAllString(input, "")
+	normalized := softLineBreakRe.ReplaceAllString(input, "")
 	var out strings.Builder
 	var bytesBuf []byte
 	flush := func() {
@@ -440,13 +473,13 @@ func decodeQuotedPrintable(input string) string {
 }
 
 func extractMimeTextParts(raw string) []string {
-	sections := regexp.MustCompile(`(?m)\r?\n--[^\r\n]*`).Split(raw, -1)
+	sections := mimeBoundaryRe.Split(raw, -1)
 	var out []string
 	for _, section := range sections {
-		if !regexp.MustCompile(`(?i)Content-Type:\s*text/(?:plain|html)\b`).MatchString(section) {
+		if !textContentTypeRe.MatchString(section) {
 			continue
 		}
-		idx := regexp.MustCompile(`\r?\n\r?\n`).FindStringIndex(section)
+		idx := headerBodySplitRe.FindStringIndex(section)
 		if idx == nil {
 			continue
 		}
@@ -460,16 +493,19 @@ func extractMimeTextParts(raw string) []string {
 }
 
 func getHeader(headers, name string) string {
-	re := regexp.MustCompile(`(?im)^[\t ]*` + regexp.QuoteMeta(name) + `:\s*([^\r\n]*(?:\r?\n[\t ][^\r\n]*)*)`)
+	re, ok := headerRes[name]
+	if !ok {
+		re = headerRe(name)
+	}
 	m := re.FindStringSubmatch(headers)
 	if len(m) < 2 {
 		return ""
 	}
-	return regexp.MustCompile(`\r?\n[\t ]+`).ReplaceAllString(m[1], " ")
+	return headerUnfoldRe.ReplaceAllString(m[1], " ")
 }
 
 func charsetFromContentType(contentType string) string {
-	m := regexp.MustCompile(`(?i)\bcharset\s*=\s*"?([^";\s]+)"?`).FindStringSubmatch(contentType)
+	m := charsetRe.FindStringSubmatch(contentType)
 	if len(m) > 1 {
 		return m[1]
 	}
@@ -479,7 +515,7 @@ func charsetFromContentType(contentType string) string {
 func decodeMimeBody(body, transfer, charset string) string {
 	switch strings.ToLower(transfer) {
 	case "base64":
-		cleaned := regexp.MustCompile(`(?i)[^a-z0-9+/=]`).ReplaceAllString(body, "")
+		cleaned := base64JunkRe.ReplaceAllString(body, "")
 		raw, err := base64.StdEncoding.DecodeString(cleaned)
 		if err != nil {
 			return body
@@ -506,9 +542,9 @@ func decodeCharset(raw []byte, charset string) string {
 }
 
 func stripHTML(text string, maxLen int) string {
-	s := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(text, " ")
+	s := htmlTagRe.ReplaceAllString(text, " ")
 	s = htmlEntityDecode(s)
-	s = regexp.MustCompile(`\s{2,}`).ReplaceAllString(s, " ")
+	s = multiSpaceRe.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	if len([]rune(s)) > maxLen {
 		s = string([]rune(s)[:maxLen])
@@ -517,13 +553,12 @@ func stripHTML(text string, maxLen int) string {
 }
 
 func htmlEntityDecode(s string) string {
-	replacer := strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&apos;", "'")
-	return replacer.Replace(s)
+	return htmlEntityReplacer.Replace(s)
 }
 
 func NormalizeText(value string) string {
 	s := strings.ToLower(value)
-	s = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(s, " ")
+	s = nonAlnumRe.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)
 }
 
@@ -542,7 +577,7 @@ func hasTerm(text, term string) bool {
 }
 
 func extractLinks(text string) []string {
-	matches := regexp.MustCompile(`https?://[^\s"'<>]+`).FindAllString(text, -1)
+	matches := linkRe.FindAllString(text, -1)
 	seen := map[string]bool{}
 	var out []string
 	for _, m := range matches {
@@ -601,26 +636,59 @@ func parseMatchableURL(raw string) *parsedURL {
 	return p
 }
 
-func MatchRejectionEmail(repo *db.Repository, message Message) (matchResult, error) {
-	active, err := getAppliedJobs(repo, "AND COALESCE(stage, '') NOT IN ('rejected')")
-	if err != nil {
-		return matchResult{}, err
+// matcher caches the tenant's applied-job sets for one mailbox sweep. The sets
+// are stable across a sweep except when a rejection is applied, so loading them
+// once (instead of per candidate email) avoids O(candidates) full applied-jobs
+// queries; callers invalidate after a successful apply.
+type matcher struct {
+	repo           *db.Repository
+	active         []job
+	activeLoaded   bool
+	rejected       []job
+	rejectedLoaded bool
+}
+
+func newMatcher(repo *db.Repository) *matcher { return &matcher{repo: repo} }
+
+// invalidate drops the cached sets so the next match reloads them; call it
+// after a job's stage changes mid-sweep.
+func (m *matcher) invalidate() {
+	m.active, m.rejected = nil, nil
+	m.activeLoaded, m.rejectedLoaded = false, false
+}
+
+func (m *matcher) match(message Message) (matchResult, error) {
+	if !m.activeLoaded {
+		jobs, err := getAppliedJobs(m.repo, "AND COALESCE(stage, '') NOT IN ('rejected')")
+		if err != nil {
+			return matchResult{}, err
+		}
+		m.active, m.activeLoaded = jobs, true
 	}
-	if m := matchByURL(message, active); m.Job != nil {
-		return m, nil
+	if r := matchByURL(message, m.active); r.Job != nil {
+		return r, nil
 	}
-	result := matchByCompanyAndTitle(message, active)
+	result := matchByCompanyAndTitle(message, m.active)
 	if result.Job != nil || result.Reason != "no_company_match" {
 		return result, nil
 	}
-	rejected, err := getAppliedJobs(repo, "AND COALESCE(stage, '') = 'rejected'")
-	if err != nil {
-		return matchResult{}, err
+	if !m.rejectedLoaded {
+		jobs, err := getAppliedJobs(m.repo, "AND COALESCE(stage, '') = 'rejected'")
+		if err != nil {
+			return matchResult{}, err
+		}
+		m.rejected, m.rejectedLoaded = jobs, true
 	}
-	if m := matchByURL(message, rejected); m.Job != nil {
-		return m, nil
+	if r := matchByURL(message, m.rejected); r.Job != nil {
+		return r, nil
 	}
-	return matchByCompanyAndTitle(message, rejected), nil
+	return matchByCompanyAndTitle(message, m.rejected), nil
+}
+
+// MatchRejectionEmail matches one message against the current applied-job sets
+// (one-shot form of matcher.match).
+func MatchRejectionEmail(repo *db.Repository, message Message) (matchResult, error) {
+	return newMatcher(repo).match(message)
 }
 
 func getAppliedJobs(repo *db.Repository, where string) ([]job, error) {

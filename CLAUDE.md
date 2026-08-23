@@ -53,7 +53,7 @@ Claude Code also has two import helpers (these live only in `.claude/commands/`,
 | Command | When to use |
 |---|---|
 | `/add-job [paste LinkedIn JD]` | Parse a pasted LinkedIn listing and create a scored record in the jobs DB. |
-| `/add-company [name or careers URL]` | Add a specific employer to the pipeline. Finds and verifies its ATS board (Greenhouse/Ashby/Lever/Workday) via the go-backend `add-company` subcommand, then it is scraped on the next run. Good for large or legacy employers that automated discovery misses. |
+| `/add-company [name or careers URL]` | Add a specific employer to the pipeline. Finds and verifies its ATS board (Greenhouse/Ashby/Lever/Gem/SmartRecruiters/Workday) via the go-backend `add-company` subcommand, then it is scraped on the next run. Good for large or legacy employers that automated discovery misses. |
 
 All commands read profile files from `data/`. In Docker, SQLite lives in the named volume mounted at `/app/db`; outside Docker it falls back to `data/jobs.db`.
 

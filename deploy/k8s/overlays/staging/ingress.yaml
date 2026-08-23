@@ -1,0 +1,23 @@
+# cloudflared forwards staging.siftroles.com to localhost:80 with the Host
+# header intact; Traefik routes on it. TLS terminates at Cloudflare, so only
+# the `web` entrypoint exists (websecure is disabled cluster-wide, see
+# deploy/k3s/traefik-config.yaml).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jsa
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: staging.siftroles.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-backend
+                port:
+                  number: 3131

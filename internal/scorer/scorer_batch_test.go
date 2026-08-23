@@ -15,39 +15,50 @@ import (
 )
 
 func TestParseBatchResponse(t *testing.T) {
-	t.Run("well formed maps by index and clamps", func(t *testing.T) {
-		text := `[{"index":0,"score":8,"reasoning":"a"},{"index":1,"score":42,"reasoning":"b"},{"index":2,"score":0,"reasoning":"c"}]`
+	t.Run("well formed maps by job_id and clamps", func(t *testing.T) {
+		text := `[{"job_id":"j0","score":8,"reasoning":"a"},{"job_id":"j1","score":42,"reasoning":"b"},{"job_id":"j2","score":0,"reasoning":"c"}]`
 		got := parseBatchResponse(text, 3)
 		if len(got) != 3 {
 			t.Fatalf("got %d results, want 3", len(got))
 		}
 		if got[0].Score == nil || *got[0].Score != 8 {
-			t.Fatalf("index 0 score = %v, want 8", ptrStr(got[0].Score))
+			t.Fatalf("job j0 score = %v, want 8", ptrStr(got[0].Score))
 		}
 		if got[1].Score == nil || *got[1].Score != 10 {
-			t.Fatalf("index 1 score = %v, want 10 (clamped)", ptrStr(got[1].Score))
+			t.Fatalf("job j1 score = %v, want 10 (clamped)", ptrStr(got[1].Score))
 		}
 		if got[2].Score == nil || *got[2].Score != 1 {
-			t.Fatalf("index 2 score = %v, want 1 (clamped)", ptrStr(got[2].Score))
+			t.Fatalf("job j2 score = %v, want 1 (clamped)", ptrStr(got[2].Score))
 		}
 	})
 
-	t.Run("drops out-of-range and missing indices", func(t *testing.T) {
-		text := `[{"index":0,"score":7,"reasoning":"a"},{"index":9,"score":7,"reasoning":"x"}]`
+	t.Run("drops out-of-range, unknown-format, and missing ids", func(t *testing.T) {
+		text := `[{"job_id":"j0","score":7,"reasoning":"a"},{"job_id":"j9","score":7,"reasoning":"x"},{"job_id":"banana","score":7,"reasoning":"y"},{"job_id":"","score":7,"reasoning":"z"},{"score":7,"reasoning":"w"}]`
 		got := parseBatchResponse(text, 3)
 		if _, ok := got[0]; !ok {
-			t.Fatal("index 0 missing")
+			t.Fatal("job j0 missing")
 		}
-		if _, ok := got[9]; ok {
-			t.Fatal("out-of-range index 9 should be dropped")
+		if len(got) != 1 {
+			t.Fatalf("got %d results, want only j0 (out-of-range and unknown ids dropped)", len(got))
 		}
 		if _, ok := got[1]; ok {
-			t.Fatal("index 1 was never returned; should be absent")
+			t.Fatal("job j1 was never returned; should be absent")
+		}
+	})
+
+	t.Run("duplicate job_id keeps the first entry", func(t *testing.T) {
+		text := `[{"job_id":"j0","score":8,"reasoning":"first"},{"job_id":"j0","score":2,"reasoning":"second"}]`
+		got := parseBatchResponse(text, 2)
+		if len(got) != 1 {
+			t.Fatalf("got %d results, want 1", len(got))
+		}
+		if got[0].Score == nil || *got[0].Score != 8 || got[0].Reasoning != "first" {
+			t.Fatalf("duplicate id should keep the first entry, got %v %q", ptrStr(got[0].Score), got[0].Reasoning)
 		}
 	})
 
 	t.Run("tolerates code fences", func(t *testing.T) {
-		text := "```json\n[{\"index\":0,\"score\":6,\"reasoning\":\"a\"}]\n```"
+		text := "```json\n[{\"job_id\":\"j0\",\"score\":6,\"reasoning\":\"a\"}]\n```"
 		got := parseBatchResponse(text, 1)
 		if got[0].Score == nil || *got[0].Score != 6 {
 			t.Fatalf("fenced JSON not parsed: %v", ptrStr(got[0].Score))
@@ -61,21 +72,49 @@ func TestParseBatchResponse(t *testing.T) {
 	})
 }
 
+// The prompts must keep their content ordered most-stable-first so Gemini's
+// implicit prefix caching gets hits: static rubric before the per-tenant
+// resume, resume before the per-call job block(s).
 func TestScoringPromptsKeepVariableJobsLast(t *testing.T) {
-	single := buildScorePrompt("resume", Job{Title: "variable job"})
-	if strings.Index(single, "STEP 1") > strings.Index(single, "## Job Listing") {
-		t.Fatalf("single prompt puts rubric after the variable job listing")
+	single := buildScorePrompt("resume", 4.0, Job{Title: "variable job"})
+	if strings.Index(single, "STEP 1") > strings.Index(single, "## Candidate Resume") {
+		t.Fatalf("single prompt puts rubric after the per-tenant resume")
+	}
+	if strings.Index(single, "## Candidate Resume") > strings.Index(single, "## Job Listing") {
+		t.Fatalf("single prompt puts resume after the variable job listing")
 	}
 	if !strings.HasSuffix(single, "No description available.") {
 		t.Fatalf("single prompt should end with the variable job block, got tail %q", single[len(single)-40:])
 	}
 
-	batch := buildBatchPrompt("resume", []Job{{Title: "a"}, {Title: "b"}})
-	if strings.Index(batch, "STEP 1") > strings.Index(batch, "## Job Listings") {
-		t.Fatalf("batch prompt puts rubric after variable job listings")
+	batch := buildBatchPrompt("resume", 4.0, []Job{{Title: "a"}, {Title: "b"}})
+	if strings.Index(batch, "STEP 1") > strings.Index(batch, "## Candidate Resume") {
+		t.Fatalf("batch prompt puts rubric after the per-tenant resume")
 	}
-	if !strings.Contains(batch, "Include every job exactly once.\n\n## Job Listings") {
-		t.Fatalf("batch prompt should declare output contract before variable listings")
+	if strings.Index(batch, "## Candidate Resume") > strings.Index(batch, "## Job Listings") {
+		t.Fatalf("batch prompt puts resume after variable job listings")
+	}
+	if !strings.Contains(batch, "Include every job exactly once.\n\n## Candidate Resume") {
+		t.Fatalf("batch prompt should declare output contract before the resume and listings")
+	}
+	if isolation := strings.Index(batch, "COMPLETE ISOLATION"); isolation < 0 || isolation > strings.Index(batch, "## Candidate Resume") {
+		t.Fatalf("batch prompt must state the isolation rule inside the static prefix")
+	}
+	if !strings.Contains(batch, "### Job j0\n") || !strings.Contains(batch, "### Job j1\n") {
+		t.Fatalf("batch prompt job blocks must carry j<N> headings for job_id-keyed output")
+	}
+
+	// The static prefix (everything before the resume) must be byte-identical
+	// across tenants and calls; a drifting prefix silently kills cache hits.
+	singlePrefix := single[:strings.Index(single, "## Candidate Resume")]
+	other := buildScorePrompt("a different resume", 4.0, Job{Title: "another job"})
+	if otherPrefix := other[:strings.Index(other, "## Candidate Resume")]; otherPrefix != singlePrefix {
+		t.Fatalf("single prompt static prefix varies across calls")
+	}
+	batchPrefix := batch[:strings.Index(batch, "## Candidate Resume")]
+	otherBatch := buildBatchPrompt("a different resume", 4.0, []Job{{Title: "c"}, {Title: "d"}, {Title: "e"}})
+	if otherPrefix := otherBatch[:strings.Index(otherBatch, "## Candidate Resume")]; otherPrefix != batchPrefix {
+		t.Fatalf("batch prompt static prefix varies across calls")
 	}
 }
 
@@ -94,8 +133,8 @@ func TestScoreJobsReconciles(t *testing.T) {
 		_ = json.Unmarshal(body, &req)
 		if req.GenerationConfig.ResponseMimeType == "application/json" {
 			batchHits.Add(1)
-			// Return only index 0 and 2; drop index 1 to force reconciliation.
-			writeCandidate(w, `[{"index":0,"score":8,"reasoning":"a"},{"index":2,"score":9,"reasoning":"c"}]`)
+			// Return only jobs j0 and j2; drop j1 to force reconciliation.
+			writeCandidate(w, `[{"job_id":"j0","score":8,"reasoning":"a"},{"job_id":"j2","score":9,"reasoning":"c"}]`)
 			return
 		}
 		singleHits.Add(1)
@@ -146,7 +185,7 @@ func TestScoringPinsTemperature(t *testing.T) {
 		_ = json.Unmarshal(body, &req)
 		lastTemp = req.GenerationConfig.Temperature
 		if req.GenerationConfig.ResponseMimeType == "application/json" {
-			writeCandidate(w, `[{"index":0,"score":3,"reasoning":"a"},{"index":1,"score":3,"reasoning":"b"}]`)
+			writeCandidate(w, `[{"job_id":"j0","score":3,"reasoning":"a"},{"job_id":"j1","score":3,"reasoning":"b"}]`)
 			return
 		}
 		writeCandidate(w, "SCORE: 3\nREASONING: ok")
@@ -204,9 +243,9 @@ func TestScoreJobsTwoStage(t *testing.T) {
 		_ = json.Unmarshal(body, &req)
 		if req.GenerationConfig.ResponseMimeType == "application/json" {
 			batchHits.Add(1)
-			// index 0 scores high (>= threshold) so it must be re-scored; index 1
-			// scores low and must be left as-is.
-			writeCandidate(w, `[{"index":0,"score":9,"reasoning":"batch high"},{"index":1,"score":4,"reasoning":"batch low"}]`)
+			// j0 scores high (>= threshold) so it must be re-scored; j1 scores
+			// low and must be left as-is.
+			writeCandidate(w, `[{"job_id":"j0","score":9,"reasoning":"batch high"},{"job_id":"j1","score":4,"reasoning":"batch low"}]`)
 			return
 		}
 		singleHits.Add(1)
@@ -232,5 +271,19 @@ func TestScoreJobsTwoStage(t *testing.T) {
 	}
 	if singleHits.Load() != 1 {
 		t.Fatalf("stage-two calls = %d, want 1 (only the high scorer)", singleHits.Load())
+	}
+}
+
+func TestFormatJobBlockCapsDescription(t *testing.T) {
+	long := strings.Repeat("x", scoreDescriptionLength+5000)
+	block := formatJobBlock(Job{Title: "t", Company: "c", Description: long})
+	if strings.Contains(block, long) {
+		t.Fatal("description was not truncated")
+	}
+	if !strings.Contains(block, long[:scoreDescriptionLength]) {
+		t.Fatal("truncated description missing from block")
+	}
+	if len(block) > scoreDescriptionLength+500 {
+		t.Fatalf("block length = %d, want about %d", len(block), scoreDescriptionLength)
 	}
 }

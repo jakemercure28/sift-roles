@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"job-search-automation/internal/model"
@@ -84,7 +85,8 @@ func (s *Server) handleImportJob(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.log.Warn("import job score failed", "id", req.ID, "error", err)
 		} else if result.Score != nil {
-			if err := s.repo.UpdateJobScore(jobID, *result.Score, result.Reasoning); err != nil {
+			resumeHash := scorer.HashResume(readTextFileSafe(filepath.Join(s.dataDir, "resume.md")))
+			if err := s.repo.UpdateJobScoreForResume(jobID, *result.Score, result.Reasoning, resumeHash); err != nil {
 				s.log.Warn("import job save score failed", "id", jobID, "error", err)
 			} else {
 				resp.Score = result.Score

@@ -27,15 +27,17 @@ function urlOf(input: unknown): string {
 }
 
 /**
- * Replace global fetch with one that serves `resolve(url)` as a 200 JSON body
- * (or 404 when it returns undefined). Returns a restore function.
+ * Replace global fetch with one that serves `resolve(url, init)` as a 200 JSON
+ * body (or 404 when it returns undefined). `init` is the fetch options, so a
+ * mock can route POST scrapers (e.g. GraphQL) on the request body rather than
+ * the URL alone. Returns a restore function.
  */
 export function installFetchMock(
-  resolve: (url: string) => unknown
+  resolve: (url: string, init?: RequestInit) => unknown
 ): () => void {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: unknown) => {
-    const body = resolve(urlOf(input));
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const body = resolve(urlOf(input), init);
     if (body === undefined) return new Response('Not found', { status: 404 });
     // String bodies (e.g. RSS/XML feeds) pass through as raw text; objects are
     // serialized as JSON so res.json() parses them.

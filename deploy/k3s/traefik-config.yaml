@@ -1,0 +1,18 @@
+# Customizes the k3s-bundled Traefik helm chart. Copy to
+# /var/lib/rancher/k3s/server/manifests/ BEFORE first k3s start so Traefik
+# never binds :443 (see docs/k8s-migration.md).
+#
+# Why: TLS terminates at Cloudflare (tunnel → localhost:80), and tailscaled
+# owns 100.87.101.41:443 for `tailscale serve`. If websecure stayed exposed,
+# servicelb's hostPort DNAT would hijack tailnet traffic to :443.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    ports:
+      websecure:
+        expose:
+          default: false

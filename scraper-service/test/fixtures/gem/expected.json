@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Platform Engineer",
+    "company": "Acme",
+    "description": "Build and scale platforms. Compensation $180,000 - $220,000",
+    "direct_apply_url": "https://jobs.gem.com/acme/e1",
+    "ats_platform_name": "Gem",
+    "scraped_timestamp": "",
+    "location": "Remote",
+    "posted_at": ""
+  },
+  {
+    "title": "Backend Engineer",
+    "company": "Acme",
+    "description": "Own backend services.",
+    "direct_apply_url": "https://jobs.gem.com/acme/e3",
+    "ats_platform_name": "Gem",
+    "scraped_timestamp": "",
+    "location": "New York, NY | Austin, TX",
+    "posted_at": ""
+  }
+]

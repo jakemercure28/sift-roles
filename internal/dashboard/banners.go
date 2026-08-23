@@ -71,40 +71,27 @@ func renderScraperHeartbeatBanner(hb *db.Heartbeat) string {
 	if hb == nil {
 		return ""
 	}
+	// A failed scrape run is operator detail (a deploy restart trips it
+	// mid-cycle): it stays in the logs and the heartbeat row, never in
+	// tenant-facing HTML. The banner only reports the one thing a tenant can
+	// act on, listings that are actually going stale, so an errored heartbeat
+	// with a recent success renders nothing.
 	lastSuccess := hb.LastSuccessAt
-	errored := hb.Status == "error"
-	staleH := hoursSince(lastSuccess)
-	stale := staleH > scrapeStaleHours
-
-	// Healthy heartbeat now renders inside the page status line under the title
-	// (renderDashboardTitle); only the error/stale warning stays a banner.
-	if !errored && !stale {
+	if lastSuccess == "" {
 		return ""
 	}
-
-	bg, border, color := "var(--amber-glow)", "var(--amber)", "var(--amber)"
-	if errored {
-		bg, border, color = "var(--red-glow)", "var(--red)", "var(--red)"
+	staleH := hoursSince(lastSuccess)
+	if staleH <= scrapeStaleHours || math.IsInf(staleH, 1) {
+		return ""
 	}
-	var msg string
-	if errored {
-		msg = `Last scrape <strong>failed</strong>`
-		if hb.Error != "" {
-			msg += " — " + escapeHTML(hb.Error)
-		}
-		msg += "."
-	} else {
-		msg = `<strong>No successful scrape in ` + strconv.Itoa(int(math.Floor(staleH))) + `h.</strong> Job listings may be stale.`
-	}
-	lastGood := ""
-	if lastSuccess != "" {
-		lastGood = `<span style="color:var(--text-muted);margin-left:4px">Last good: ` + timeAgo(lastSuccess) + `</span>`
-	}
-	return `<div style="background:` + bg + `;border:1px solid ` + border + `;padding:8px 16px;margin:8px 16px;border-radius:6px;font-size:13px;color:` + color + `;display:flex;align-items:center;gap:8px">
+	msg := `<strong>No successful scrape in ` + strconv.Itoa(int(math.Floor(staleH))) + `h.</strong> Job listings may be stale.`
+	lastGood := `<span style="color:var(--text-muted);margin-left:4px">Last good: ` + timeAgo(lastSuccess) + `</span>`
+	// Status only, no action: scrape health is the operator's to fix, and in
+	// global mode a per-tenant re-scrape can't refresh the shared board pass
+	// this banner reports on anyway.
+	return `<div style="background:var(--amber-glow);border:1px solid var(--amber);padding:8px 16px;margin:8px 16px;border-radius:6px;font-size:13px;color:var(--amber);display:flex;align-items:center;gap:8px">
   <span style="font-size:16px">&#9888;</span>
   <span>` + msg + ` ` + lastGood + `</span>
-  <span id="scrape-now-status" style="margin-left:auto;font-size:12px;color:var(--text-muted)"></span>
-  <button type="button" id="scrape-now-btn" onclick="scrapeNow(this)" style="flex-shrink:0;background:transparent;border:1px solid currentColor;color:inherit;border-radius:5px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer">Scrape now</button>
 </div>`
 }
 
@@ -113,11 +100,26 @@ func renderScraperHeartbeatBanner(hb *db.Heartbeat) string {
 func renderSlugHealthBanner() string { return "" }
 func renderJdHealthBanner() string   { return "" }
 
-// renderDashboardMainContent ports renderDashboardMainContent: the three banners
+// renderStaleResumeBanner reports how many kept pending scores were computed
+// against an older resume (resume edits keep low/mid scores instead of
+// re-spending the whole scoring budget; only the high band re-queues). Quiet
+// informational chrome: neutral colors, no action button, n <= 0 renders "".
+func renderStaleResumeBanner(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return `<div style="background:var(--bg-secondary);border:1px solid var(--border);padding:8px 16px;margin:8px 16px;border-radius:6px;font-size:13px;color:var(--text-muted);display:flex;align-items:center;gap:8px">
+  <span style="font-size:16px">&#8635;</span>
+  <span><strong>` + strconv.Itoa(n) + ` scores reflect an older resume.</strong> New listings and strong matches are re-scored against your latest resume automatically.</span>
+</div>`
+}
+
+// renderDashboardMainContent ports renderDashboardMainContent: the banners
 // then the body. With all banners empty this is "\n\n" + bodyHtml.
-func renderDashboardMainContent(bodyHTML string, hb *db.Heartbeat) string {
+func renderDashboardMainContent(bodyHTML string, hb *db.Heartbeat, staleScores int) string {
 	var b strings.Builder
 	b.WriteString(renderScraperHeartbeatBanner(hb))
+	b.WriteString(renderStaleResumeBanner(staleScores))
 	b.WriteString(renderJdHealthBanner())
 	b.WriteString("\n")
 	b.WriteString(renderSlugHealthBanner())

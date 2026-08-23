@@ -6,11 +6,13 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
+	"job-search-automation/internal/closedcheck"
 	"job-search-automation/internal/db"
 	"job-search-automation/internal/metrics"
 	"job-search-automation/internal/middleware"
@@ -35,9 +37,29 @@ type Scheduler struct {
 	// discovered and every scrape would find nothing. Best-effort; errors are
 	// logged, not fatal.
 	discover func(context.Context, *db.Repository) error
+	// score, when set, runs a budgeted scoring pass for a tenant right after that
+	// tenant's scrape completes, so fresh rows do not sit unscored until the next
+	// scoring cron tick. Best-effort; errors are logged, not fatal.
+	score func(context.Context, *db.Repository) error
+	// scoreBurst, when set, scores a slice of a tenant's best-matching pending
+	// jobs immediately on the user-triggered first-run path. It receives the same
+	// seed keywords used for the global-jobs seed so the burst ranks candidates
+	// the way the seed did. Best-effort; errors are logged, not fatal.
+	scoreBurst func(context.Context, *db.Repository, []string) error
+	// global, when set, switches the cron fan-out to global-first scraping:
+	// one board-mode scrape of the cross-tenant board union, per-tenant
+	// distribution from global_jobs, and board-diff closed detection. See
+	// globalscrape.go.
+	global *GlobalScrapeConfig
 	// globalSeedLimit bounds the first-run seed from global_jobs before the slower
 	// discovery/scrape path runs. 0 disables seeding.
 	globalSeedLimit int
+	// globalSeedMaxAgeDays bounds the seed to recently-seen global jobs. 0
+	// disables the age cap.
+	globalSeedMaxAgeDays int
+	// verifyPost overrides the diff-close liveness prober's HTTP transport in
+	// tests; nil uses the real closedcheck default.
+	verifyPost closedcheck.PostFetcher
 }
 
 // Result summarizes one scrape→insert cycle.
@@ -85,6 +107,30 @@ func (s *Scheduler) RunOnce(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 
+	// Global-first: scrape the distinct-board union once for every tenant, so
+	// the per-tenant loop below only distributes from the harvest and scrapes
+	// the aggregator platforms board mode can't cover.
+	//
+	// The board scrape and the distribution/scoring loop below share this one
+	// cycle context. A large folded-registry union can take the entire budget,
+	// which would hand distribution an already-expired context and starve every
+	// tenant's queue. So bound the board scrape to (deadline - DistributeReserve),
+	// leaving the reserve for distribution. The reserve is best-effort: if the
+	// remaining budget is already under the reserve we skip bounding rather than
+	// give the board scrape no time at all.
+	var gc globalCycle
+	if s.global != nil {
+		boardCtx := ctx
+		if dl, ok := ctx.Deadline(); ok {
+			if bd, apply := boardScrapeDeadline(dl, s.global.DistributeReserve, time.Now()); apply {
+				var cancel context.CancelFunc
+				boardCtx, cancel = context.WithDeadline(ctx, bd)
+				defer cancel()
+			}
+		}
+		gc = s.runGlobalBoards(boardCtx, tenants, log)
+	}
+
 	var total Result
 	var firstErr error
 	for _, uid := range tenants {
@@ -92,14 +138,54 @@ func (s *Scheduler) RunOnce(ctx context.Context) (Result, error) {
 		if uid != db.LocalUser {
 			repo = s.repo.ForUser(uid)
 		}
-		res, err := s.scrapeTenant(ctx, repo, uid, log)
+		if s.global != nil {
+			total.Inserted += s.distributeTenant(ctx, repo, gc, log)
+		}
+		res, err := s.scrapeTenant(ctx, repo, uid, s.cronPlatforms(), log)
 		total.Scraped += res.Scraped
 		total.Inserted += res.Inserted
 		if err != nil && firstErr == nil {
 			firstErr = err
 		}
+		// Chain a scoring pass for this tenant while its scrape output is fresh,
+		// so new listings do not wait out the gap to the next scoring cron tick.
+		// Skipped after a failed scrape: there is nothing new to score and the
+		// error already surfaced above. (Distributed rows are scored by the same
+		// pass, so distribution needs no separate hook.)
+		if err == nil {
+			s.scoreTenant(ctx, repo, log)
+		}
 	}
+	total.Scraped += gc.harvested
 	return total, firstErr
+}
+
+// boardScrapeDeadline computes the deadline to bound the global board scrape so
+// reserve time is left for the distribution/scoring loop that shares the cycle
+// context. It returns (deadline, true) when the reserve should be applied, or
+// (_, false) when it should not: reserve <= 0 (disabled), or the remaining
+// budget is already at/under the reserve (bounding would give the board scrape
+// no time, so let it use what's left instead).
+func boardScrapeDeadline(cycleDeadline time.Time, reserve time.Duration, now time.Time) (time.Time, bool) {
+	if reserve <= 0 {
+		return time.Time{}, false
+	}
+	bd := cycleDeadline.Add(-reserve)
+	if !bd.After(now) {
+		return time.Time{}, false
+	}
+	return bd, true
+}
+
+// scoreTenant invokes the post-scrape scoring hook when one is installed.
+// Best-effort by design: scoring problems must never fail a scrape cycle.
+func (s *Scheduler) scoreTenant(ctx context.Context, repo *db.Repository, log *slog.Logger) {
+	if s.score == nil {
+		return
+	}
+	if err := s.score(ctx, repo); err != nil {
+		log.Warn("post-scrape scoring failed", "user_id", repo.UserID(), "error", err)
+	}
 }
 
 // RunOnceForUser performs one scrape→insert cycle for a specific tenant without
@@ -118,13 +204,29 @@ func (s *Scheduler) RunOnceForUser(ctx context.Context, uid string) (Result, err
 	if traceID := middleware.TraceID(ctx); traceID != "" {
 		log = s.log.With("trace_id", traceID)
 	}
+	keywords := seedKeywordsForTenant(repo, s.dataDir)
 	if s.globalSeedLimit > 0 {
-		seeded, err := repo.SeedTenantJobsFromGlobal(s.globalSeedLimit)
+		seeded, err := repo.SeedTenantJobsFromGlobal(s.globalSeedLimit, keywords, s.globalSeedMaxAgeDays)
 		if err != nil {
 			log.Warn("global job seed failed", "user_id", uid, "error", err)
 		} else if seeded > 0 {
 			log.Info("global job seed complete", "user_id", uid, "inserted", seeded, "limit", s.globalSeedLimit)
 		}
+	}
+	// Onboarding burst: score the freshly-seeded best matches concurrently with
+	// discovery and the scrape below, so a new tenant sees scored roles while the
+	// slower bootstrap is still working. The join before return matters: TryStart
+	// cancels this cycle's context when RunOnceForUser returns, which would kill
+	// an orphaned burst mid-call.
+	var burstWG sync.WaitGroup
+	if s.scoreBurst != nil {
+		burstWG.Add(1)
+		go func() {
+			defer burstWG.Done()
+			if err := s.scoreBurst(ctx, repo, keywords); err != nil {
+				log.Warn("onboarding burst scoring failed", "user_id", uid, "error", err)
+			}
+		}()
 	}
 	// Bootstrap step: a freshly onboarded tenant has empty company lists, so its
 	// first scrape would find nothing and it would never enter Tenants() for the
@@ -135,7 +237,14 @@ func (s *Scheduler) RunOnceForUser(ctx context.Context, uid string) (Result, err
 			log.Warn("pre-scrape discovery failed", "error", err)
 		}
 	}
-	return s.scrapeTenant(ctx, repo, uid, log)
+	res, err := s.scrapeTenant(ctx, repo, uid, s.platforms, log)
+	burstWG.Wait()
+	// With the burst joined, chain the regular post-scrape pass so the freshly
+	// scraped rows (and any seeds past the burst's budget) get scores this cycle.
+	if err == nil {
+		s.scoreTenant(ctx, repo, log)
+	}
+	return res, err
 }
 
 // SetDiscoveryHook installs the pre-scrape company-discovery bootstrap used by the
@@ -144,23 +253,39 @@ func (s *Scheduler) SetDiscoveryHook(fn func(context.Context, *db.Repository) er
 	s.discover = fn
 }
 
+// SetScoringHook installs the post-scrape scoring pass run for each tenant after
+// its scrape completes, on both the fan-out (cron/boot/trigger) and single-tenant
+// first-run paths. See the score field.
+func (s *Scheduler) SetScoringHook(fn func(context.Context, *db.Repository) error) {
+	s.score = fn
+}
+
+// SetOnboardBurstHook installs the onboarding scoring burst run concurrently
+// with the user-triggered first scrape. See the scoreBurst field.
+func (s *Scheduler) SetOnboardBurstHook(fn func(context.Context, *db.Repository, []string) error) {
+	s.scoreBurst = fn
+}
+
 // SetGlobalJobSeedLimit enables bounded seeding from the global job cache on the
-// user-triggered scrape path (setup wizard / "Scrape now").
-func (s *Scheduler) SetGlobalJobSeedLimit(n int) {
+// user-triggered scrape path (setup wizard / "Scrape now"). maxAgeDays keeps the
+// seed to listings seen within that window (0 disables the cap).
+func (s *Scheduler) SetGlobalJobSeedLimit(n, maxAgeDays int) {
 	s.globalSeedLimit = n
+	s.globalSeedMaxAgeDays = maxAgeDays
 }
 
 // scrapeTenant runs the scrape→insert cycle for a single tenant against its own
 // repository and profile dir. New rows are inserted as pending/unscored and get a
-// 'scraped' event.
-func (s *Scheduler) scrapeTenant(ctx context.Context, repo *db.Repository, uid string, log *slog.Logger) (Result, error) {
+// 'scraped' event. platforms nil/empty means all; the cron fan-out narrows it
+// to the aggregators when the global board pass covers the board platforms.
+func (s *Scheduler) scrapeTenant(ctx context.Context, repo *db.Repository, uid string, platforms []string, log *slog.Logger) (Result, error) {
 	if uid != db.LocalUser {
 		log = log.With("user_id", uid)
 	}
 	profileDir := db.TenantDataDir(s.dataDir, repo.DBType(), uid)
 	start := time.Now()
 
-	leads, err := s.client.Scrape(ctx, s.platforms, profileDir)
+	leads, err := s.client.Scrape(ctx, platforms, profileDir)
 	if err != nil {
 		if hbErr := repo.WriteHeartbeat("error", 0, 0, err.Error()); hbErr != nil {
 			log.Warn("heartbeat write failed", "error", hbErr)

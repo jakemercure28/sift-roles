@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scraper-service
+  labels:
+    app: scraper-service
+spec:
+  # One replica, Recreate: shares the RWO data volume with go-backend.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: scraper-service
+  template:
+    metadata:
+      labels:
+        app: scraper-service
+    spec:
+      securityContext:
+        # The node image ships uid 1000 (`node`); same uid as go-backend so
+        # the shared volume needs exactly one ownership story.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: scraper-service
+          image: localhost:5000/jsa/scraper-service:latest
+          ports:
+            - name: http
+              containerPort: 4040
+          env:
+            - name: DATA_DIR
+              value: /app/data
+            - name: SCRAPER_PORT
+              value: '4040'
+            - name: SCRAPER_HOST
+              value: 0.0.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # All three probe /livez, not /health. /health reports work health and
+          # returns 503 while a board pass overruns SCRAPE_STUCK_MINUTES, which
+          # is a normal thing for a 5k-board pass to do. Probing it made the
+          # readiness check pull this pod out of the Service (go-backend then
+          # got connection refused on every later chunk) and the liveness check
+          # SIGKILL it mid-pass, discarding the whole pass. /livez answers 200
+          # whenever the event loop is responsive, which is the only condition a
+          # restart can actually fix.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            # cadvisor showed ~300Mi / 28% CPU mid-scrape; give the Node heap
+            # room to burst. No CPU limit (single node, avoid throttling).
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: jsa-data
+              subPath: data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: jsa-data
+          persistentVolumeClaim:
+            claimName: jsa-data
+        - name: tmp
+          emptyDir: {}

@@ -12,20 +12,21 @@ import (
 
 // themeShared holds the mode-independent values (SHARED in theme.js).
 type themeShared struct {
-	NeutralTintRgb                                         string
-	Green, GreenRgb, Red, RedRgb, Amber, AmberRgb, Blue    string
-	Emerald, EmeraldRgb, Slate, SlateLight                 string
-	AtsGreenhouse, AtsGreenhouseRgb, AtsAshby, AtsAshbyRgb string
-	AtsLever, AtsLeverRgb, AtsWorkday, AtsWorkdayRgb       string
-	ScoreGood, ScoreBorderline, ScoreWeak                  string
-	Highlight, HighlightInk                                string
-	Radius, RadiusSm, RadiusXs, FontMono                   string
-	Space2, Space4, SpaceXs, Space, SpaceM, SpaceL         string
-	SpaceXl, SpaceXxl                                      string
-	TextMeta, TextLabel, TextBody, TextTiny, TextSmall     string
-	TextH4, TextH3, TextH2, TextH1                         string
-	FontRegular, FontMedium, FontSemibold, FontBold        string
-	LeadTight, LeadBody                                    string
+	NeutralTintRgb                                               string
+	Green, GreenRgb, Red, RedRgb, Amber, AmberRgb, Blue          string
+	Emerald, EmeraldRgb, Slate, SlateLight                       string
+	AtsGreenhouse, AtsGreenhouseRgb, AtsAshby, AtsAshbyRgb       string
+	AtsLever, AtsLeverRgb, AtsWorkday, AtsWorkdayRgb             string
+	AtsGem, AtsGemRgb, AtsSmartRecruiters, AtsSmartRecruitersRgb string
+	ScoreGood, ScoreBorderline, ScoreWeak                        string
+	Highlight, HighlightInk                                      string
+	Radius, RadiusSm, RadiusXs, FontMono                         string
+	Space2, Space4, SpaceXs, Space, SpaceM, SpaceL               string
+	SpaceXl, SpaceXxl                                            string
+	TextMeta, TextLabel, TextBody, TextTiny, TextSmall           string
+	TextH4, TextH3, TextH2, TextH1                               string
+	FontRegular, FontMedium, FontSemibold, FontBold              string
+	LeadTight, LeadBody                                          string
 }
 
 // themeMode holds the per-mode values (LIGHT / DARK in theme.js).
@@ -54,6 +55,8 @@ var sharedVals = themeShared{
 	AtsAshby: "#6E66A6", AtsAshbyRgb: "110, 102, 166",
 	AtsLever: "#9C7E3A", AtsLeverRgb: "156, 126, 58",
 	AtsWorkday: "#5470A0", AtsWorkdayRgb: "84, 112, 160",
+	AtsGem: "#3E8E8E", AtsGemRgb: "62, 142, 142",
+	AtsSmartRecruiters: "#B15E3F", AtsSmartRecruitersRgb: "177, 94, 63",
 	ScoreGood: "#9C9C9C", ScoreBorderline: "#8A8A8A", ScoreWeak: "#A8A8A8",
 	Highlight: "#F9EA4F", HighlightInk: "#000000",
 	Radius: "8px", RadiusSm: "6px", RadiusXs: "4px",
@@ -166,6 +169,8 @@ const themeVarsTmpl = `
   --ats-ashby: {{.S.AtsAshby}}; --ats-ashby-rgb: {{.S.AtsAshbyRgb}};
   --ats-lever: {{.S.AtsLever}}; --ats-lever-rgb: {{.S.AtsLeverRgb}};
   --ats-workday: {{.S.AtsWorkday}}; --ats-workday-rgb: {{.S.AtsWorkdayRgb}};
+  --ats-gem: {{.S.AtsGem}}; --ats-gem-rgb: {{.S.AtsGemRgb}};
+  --ats-smartrecruiters: {{.S.AtsSmartRecruiters}}; --ats-smartrecruiters-rgb: {{.S.AtsSmartRecruitersRgb}};
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: {{or .M.ScoreGood .S.ScoreGood}};

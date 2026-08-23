@@ -31,6 +31,25 @@ func TestHealthSendsTraceHeader(t *testing.T) {
 	}
 }
 
+// Health must hit the shallow /livez, never /health: /health answers 503 while
+// a board pass overruns its stuck threshold, which would restart the worker for
+// being slow rather than for being broken.
+func TestHealthProbesLivez(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	if err := New(server.URL, time.Second).Health(context.Background()); err != nil {
+		t.Fatalf("Health returned error: %v", err)
+	}
+	if path != "/livez" {
+		t.Fatalf("Health probed %q, want %q", path, "/livez")
+	}
+}
+
 func TestScrapeSendsTraceHeader(t *testing.T) {
 	const traceID = "def456"
 	var got string

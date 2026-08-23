@@ -1,0 +1,22 @@
+# Staging tracks dev, fully automated: CI pushes an image-tag bump commit to
+# dev, Argo syncs it. Mirrors the old deploy.yml dev->staging semantics.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jsa-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:jakemercure28/job-search-automation-private.git
+    targetRevision: dev
+    path: deploy/k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jsa-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

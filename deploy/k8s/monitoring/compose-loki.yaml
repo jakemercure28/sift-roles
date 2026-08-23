@@ -1,0 +1,31 @@
+# Log sink: the compose jsa-observability Loki, which lives outside the
+# cluster on this same host and already holds every Docker container's logs
+# (shipped by promtail). Alloy pushes pod logs into it, so there is ONE Loki
+# and ONE Grafana datasource, mirroring the metrics remote_write.
+#
+# Same selector-less Service + EndpointSlice pattern as supabase-db and
+# compose-prometheus. The compose side must publish 3100 on the Tailscale IP;
+# ufw already allows the pod CIDR (10.42.0.0/16) to the host, so this needs no
+# new firewall surface. Retires at Phase 8 with the compose stack.
+apiVersion: v1
+kind: Service
+metadata:
+  name: compose-loki
+spec:
+  ports:
+    - port: 3100
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: compose-loki-1
+  labels:
+    kubernetes.io/service-name: compose-loki
+addressType: IPv4
+endpoints:
+  - addresses:
+      - 100.87.101.41
+    conditions:
+      ready: true
+ports:
+  - port: 3100

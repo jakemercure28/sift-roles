@@ -906,6 +906,14 @@ button.score-circle {
   text-transform: lowercase;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+}
+/* "via" prefix marks the badge as the source board, not the employer, so the
+   company name beside it is never mistaken for the ATS vendor. Quieter weight
+   keeps the board name the scannable part. */
+.badge-ats-label {
+  font-weight: var(--font-regular);
+  opacity: 0.7;
 }
 /* ATS/vendor source is SECONDARY but meaningful workflow data: greenhouse/ashby
    are apply-friendly, lever is fine, workday is friction. So each board gets a
@@ -930,6 +938,16 @@ button.score-circle {
   color: var(--ats-workday);
   background: rgba(var(--ats-workday-rgb), 0.12);
   border: 0.5px solid rgba(var(--ats-workday-rgb), 0.3);
+}
+.badge-ats-gem {
+  color: var(--ats-gem);
+  background: rgba(var(--ats-gem-rgb), 0.12);
+  border: 0.5px solid rgba(var(--ats-gem-rgb), 0.3);
+}
+.badge-ats-smartrecruiters {
+  color: var(--ats-smartrecruiters);
+  background: rgba(var(--ats-smartrecruiters-rgb), 0.12);
+  border: 0.5px solid rgba(var(--ats-smartrecruiters-rgb), 0.3);
 }
 
 /* ── Right cluster (date + status + chevron + dismiss) ───────────── */
@@ -2210,6 +2228,12 @@ body.dashboard-loading #dashboard-main {
 }
 
 .complexity-badge.rejected-date {
+  background: rgba(var(--tint-rgb), 0.06);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.complexity-badge.archive-reason {
   background: rgba(var(--tint-rgb), 0.06);
   color: var(--text-secondary);
   border: 1px solid var(--border);

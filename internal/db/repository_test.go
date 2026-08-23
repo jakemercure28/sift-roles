@@ -139,14 +139,14 @@ func TestSeedTenantJobsFromGlobal(t *testing.T) {
 		VALUES
 		  ('g1', 'Platform Engineer', 'Acme', 'https://example.com/g1', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Build infra.', 'h1', 'tenant-a')`)
 
-	inserted, err := repo.SeedTenantJobsFromGlobal(10)
+	inserted, err := repo.SeedTenantJobsFromGlobal(10, nil, 0)
 	if err != nil {
 		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
 	}
 	if inserted != 1 {
 		t.Fatalf("inserted = %d, want 1", inserted)
 	}
-	inserted, err = repo.SeedTenantJobsFromGlobal(10)
+	inserted, err = repo.SeedTenantJobsFromGlobal(10, nil, 0)
 	if err != nil {
 		t.Fatalf("SeedTenantJobsFromGlobal second run: %v", err)
 	}
@@ -160,6 +160,198 @@ func TestSeedTenantJobsFromGlobal(t *testing.T) {
 	}
 	if globalID != "g1" || status != "pending" {
 		t.Fatalf("seeded global_id=%q status=%q", globalID, status)
+	}
+}
+
+func TestSeedTenantJobsFromGlobalFiltersByKeyword(t *testing.T) {
+	repo := newTestRepo(t)
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, location, posted_at, scraped_at, description, description_hash, first_seen_by)
+		VALUES
+		  ('infra', 'Platform Engineer', 'Acme', 'https://example.com/infra', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Build infra.', 'h1', 'tenant-a'),
+		  ('mktg',  'Marketing Manager', 'Globex', 'https://example.com/mktg', 'lever', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Run campaigns.', 'h2', 'tenant-a')`)
+
+	inserted, err := repo.SeedTenantJobsFromGlobal(10, []string{"marketing"}, 0)
+	if err != nil {
+		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1 (only the marketing row)", inserted)
+	}
+	var count int
+	if err := repo.db.QueryRow("SELECT COUNT(*) FROM jobs WHERE global_job_id = 'infra'").Scan(&count); err != nil {
+		t.Fatalf("count infra: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("infra row was seeded despite a marketing-only keyword")
+	}
+}
+
+func TestSeedTenantJobsFromGlobalFallsBackWhenNoMatch(t *testing.T) {
+	repo := newTestRepo(t)
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, location, posted_at, scraped_at, description, description_hash, first_seen_by)
+		VALUES
+		  ('infra', 'Platform Engineer', 'Acme', 'https://example.com/infra', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Build infra.', 'h1', 'tenant-a')`)
+
+	// No global job matches "nursing", so a brand-new category with no inventory
+	// yet must still get a non-empty seed rather than nothing.
+	inserted, err := repo.SeedTenantJobsFromGlobal(10, []string{"nursing"}, 0)
+	if err != nil {
+		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1 (recency fallback)", inserted)
+	}
+}
+
+func TestSeedTenantJobsFromGlobalSkipsStaleThenRelaxes(t *testing.T) {
+	repo := newTestRepo(t)
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, location, posted_at, scraped_at, description, description_hash, first_seen_by, last_seen_at)
+		VALUES
+		  ('old-mktg', 'Marketing Manager', 'Globex', 'https://example.com/old', 'lever', 'Remote', '2026-01-01', '2026-01-02T00:00:00Z', 'Run campaigns.', 'h1', 'tenant-a', '2026-01-02 00:00:00'),
+		  ('new-infra', 'Platform Engineer', 'Acme', 'https://example.com/new', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Build infra.', 'h2', 'tenant-a', datetime('now'))`)
+
+	// The only marketing row is far older than the window, so the keyword pass
+	// must relax to any-age keywords rather than fall through to recency (which
+	// would seed the fresh but irrelevant infra row instead).
+	inserted, err := repo.SeedTenantJobsFromGlobal(10, []string{"marketing"}, 21)
+	if err != nil {
+		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1 (any-age keyword pass)", inserted)
+	}
+	var count int
+	if err := repo.db.QueryRow("SELECT COUNT(*) FROM jobs WHERE global_job_id = 'old-mktg'").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("stale marketing row was not seeded by the relaxed pass")
+	}
+}
+
+func TestSeedTenantJobsFromGlobalPrefersFreshWithinWindow(t *testing.T) {
+	repo := newTestRepo(t)
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, location, posted_at, scraped_at, description, description_hash, first_seen_by, last_seen_at)
+		VALUES
+		  ('stale', 'Marketing Manager', 'Globex', 'https://example.com/stale', 'lever', 'Remote', '2026-01-01', '2026-01-02T00:00:00Z', 'Old campaigns.', 'h1', 'tenant-a', '2026-01-02 00:00:00'),
+		  ('fresh', 'Marketing Lead', 'Acme', 'https://example.com/fresh', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'New campaigns.', 'h2', 'tenant-a', datetime('now'))`)
+
+	// A fresh keyword match exists, so the windowed pass wins and the stale row
+	// is not seeded.
+	inserted, err := repo.SeedTenantJobsFromGlobal(10, []string{"marketing"}, 21)
+	if err != nil {
+		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1 (fresh row only)", inserted)
+	}
+	var count int
+	if err := repo.db.QueryRow("SELECT COUNT(*) FROM jobs WHERE global_job_id = 'stale'").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("stale row was seeded despite a fresh match inside the window")
+	}
+}
+
+func TestSeedTenantJobsFromGlobalRanksByKeywordHits(t *testing.T) {
+	repo := newTestRepo(t)
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, location, posted_at, scraped_at, description, description_hash, first_seen_by, last_seen_at)
+		VALUES
+		  ('one-hit', 'Marketing Coordinator', 'Globex', 'https://example.com/one', 'lever', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Campaigns.', 'h1', 'tenant-a', datetime('now')),
+		  ('two-hit', 'Digital Marketing Manager', 'Acme', 'https://example.com/two', 'greenhouse', 'Remote', '2026-06-01', '2026-06-02T00:00:00Z', 'Digital campaigns.', 'h2', 'tenant-a', datetime('now', '-1 day'))`)
+
+	// limit 1: the two-keyword match must win even though the one-keyword match
+	// was seen more recently.
+	inserted, err := repo.SeedTenantJobsFromGlobal(1, []string{"marketing", "digital"}, 0)
+	if err != nil {
+		t.Fatalf("SeedTenantJobsFromGlobal: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1", inserted)
+	}
+	var count int
+	if err := repo.db.QueryRow("SELECT COUNT(*) FROM jobs WHERE global_job_id = 'two-hit'").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("double-keyword match was not ranked first")
+	}
+}
+
+func TestTopPendingByKeywords(t *testing.T) {
+	repo := newTestRepo(t)
+	for _, j := range []struct {
+		id, title, desc, created string
+	}{
+		{"j-infra", "Platform Engineer", "Build infra.", "2026-06-03 00:00:00"},
+		{"j-mktg", "Marketing Manager", "Run campaigns.", "2026-06-01 00:00:00"},
+		{"j-nodesc", "Marketing Director", "", "2026-06-02 00:00:00"},
+	} {
+		mustExec(t, repo.db, `
+			INSERT INTO jobs (id, title, company, description, status, user_id, created_at)
+			VALUES (?, ?, 'Acme', ?, 'pending', ?, ?)`, j.id, j.title, j.desc, LocalUser, j.created)
+	}
+
+	jobs, err := repo.TopPendingByKeywords(10, []string{"marketing"})
+	if err != nil {
+		t.Fatalf("TopPendingByKeywords: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("len = %d, want 2 (no-description row excluded)", len(jobs))
+	}
+	if jobs[0].ID != "j-mktg" {
+		t.Fatalf("first = %q, want the keyword match j-mktg", jobs[0].ID)
+	}
+
+	// Empty keywords fall back to unscored ordering, still without description-less rows.
+	jobs, err = repo.TopPendingByKeywords(10, nil)
+	if err != nil {
+		t.Fatalf("TopPendingByKeywords(nil): %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("fallback len = %d, want 2", len(jobs))
+	}
+	for _, j := range jobs {
+		if j.ID == "j-nodesc" {
+			t.Fatalf("description-less row leaked into burst candidates")
+		}
+	}
+}
+
+func TestCountGlobalJobsCache(t *testing.T) {
+	repo := newTestRepo(t)
+	if rows, companies, err := repo.CountGlobalJobsCache(); err != nil || rows != 0 || companies != 0 {
+		t.Fatalf("empty cache = (%d,%d,%v), want (0,0,nil)", rows, companies, err)
+	}
+	// Two rows at Acme (mixed case => one company) plus one at Globex => 3 rows, 2 companies.
+	mustExec(t, repo.db, `
+		INSERT INTO global_jobs
+		  (id, title, company, url, platform, first_seen_by)
+		VALUES
+		  ('g1', 'SRE',      'Acme',   'https://example.com/g1', 'greenhouse', 'tenant-a'),
+		  ('g2', 'Platform', 'acme',   'https://example.com/g2', 'lever',      'tenant-a'),
+		  ('g3', 'Backend',  'Globex', 'https://example.com/g3', 'ashby',      'tenant-b')`)
+
+	rows, companies, err := repo.CountGlobalJobsCache()
+	if err != nil {
+		t.Fatalf("CountGlobalJobsCache: %v", err)
+	}
+	if rows != 3 {
+		t.Fatalf("rows = %d, want 3", rows)
+	}
+	if companies != 2 {
+		t.Fatalf("companies = %d, want 2 (case-insensitive)", companies)
 	}
 }
 
@@ -397,15 +589,18 @@ func TestOpenMigratesFreshDB(t *testing.T) {
 	// goose recorded the baseline (1), user_id (2), company_registry (3),
 	// api_usage tokens (4), global_jobs (5), the global_jobs backfill (6),
 	// dashboard latency indexes (7), jobs.archive_reason (8), scoring cascade
-	// provenance (9), and the cascade drop (10).
+	// provenance (9), the cascade drop (10), jobs.freshness (11),
+	// global_job_extracts (12), jobs.resume_hash (13), registry
+	// fetch state (14), the global_jobs url index (15), the case-folded
+	// url index (16), and the score-batch tables (17).
 	var version int
 	if err := repo.db.QueryRow(
 		"SELECT MAX(version_id) FROM goose_db_version",
 	).Scan(&version); err != nil {
 		t.Fatalf("read goose version: %v", err)
 	}
-	if version != 10 {
-		t.Fatalf("goose version = %d, want 10", version)
+	if version != 17 {
+		t.Fatalf("goose version = %d, want 17", version)
 	}
 
 	// A v27 column must exist, proving the full baseline ran (not a stub).
@@ -482,16 +677,14 @@ func TestStampLegacyBaseline(t *testing.T) {
 	}
 	defer repo.Close()
 
-	// Baseline stamped (1), then user_id (2), company_registry (3),
-	// api_usage tokens (4), global_jobs (5), global_jobs backfill (6),
-	// dashboard latency indexes (7), jobs.archive_reason (8), scoring cascade
-	// provenance (9), and the cascade drop (10) applied.
+	// Baseline stamped (1), then every later migration applied, up through the
+	// score-batch tables (17).
 	var version int
 	if err := repo.db.QueryRow("SELECT MAX(version_id) FROM goose_db_version").Scan(&version); err != nil {
 		t.Fatalf("read goose version: %v", err)
 	}
-	if version != 10 {
-		t.Fatalf("goose version = %d, want 10", version)
+	if version != 17 {
+		t.Fatalf("goose version = %d, want 17", version)
 	}
 
 	// Baseline was NOT replayed: a baseline index the seed lacks (and that 00002

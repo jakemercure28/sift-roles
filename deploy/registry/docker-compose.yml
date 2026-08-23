@@ -1,0 +1,19 @@
+# Local image registry for the k3s cluster. Loopback-only by design: the CI
+# runner pushes over 127.0.0.1 (zero uplink usage) and k3s containerd pulls
+# via deploy/k3s/registries.yaml.
+#
+#   docker compose -p jsa-registry -f deploy/registry/docker-compose.yml up -d
+#
+# Retention: deploy/registry/gc.sh runs weekly from root cron (see
+# docs/k8s-migration.md). Images are rebuildable from git, so aggressive
+# pruning is safe.
+services:
+  registry:
+    image: registry:2.8.3
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:5000:5000'
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: 'true'
+    volumes:
+      - /srv/jsa/registry:/var/lib/registry

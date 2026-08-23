@@ -4,7 +4,7 @@
 #
 # Run this one line in Terminal:
 #
-#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/job-search-automation/main/install.sh)"
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/sift-roles/main/install.sh)"
 #
 # It installs everything it needs, downloads the app, and opens the dashboard
 # in your browser by itself. You will be asked for your password once, and a
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/jakemercure28/job-search-automation.git"
+REPO_URL="https://github.com/jakemercure28/sift-roles.git"
 INSTALL_DIR="$HOME/job-search-automation"
 TOTAL_STEPS=6
 

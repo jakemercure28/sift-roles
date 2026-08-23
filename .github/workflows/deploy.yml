@@ -1,0 +1,159 @@
+name: Deploy
+
+# CD half of the pipeline.
+#   push to dev  -> deploy STAGING stack on the ThinkPad (jsa-staging, :3132)
+#   push to main -> deploy PROD stack on the ThinkPad    (jsa-prod,    :3131)
+#
+# main only ever advances via a PR from dev (enforced by branch-guard.yml +
+# the `production` environment's branch policy), so a push here always means
+# "ship it". `gate` re-runs the fast Go suite first; the `deploy` and
+# `build-push` jobs only run if the gate is green. The deploy rolls back on a
+# failed healthcheck (scripts/deploy.sh).
+#
+# `build-push` is the GitOps leg (docs/k8s-migration.md, Phase 5): it builds
+# both images on the runner, pushes them to the loopback registry
+# (localhost:5000), and commits a kustomize tag bump to the overlay for this
+# branch (dev -> overlays/staging, main -> overlays/prod). Argo CD picks the
+# commit up from there; staging auto-syncs, prod stays manual-sync, so the
+# human gate on prod is the `argocd app sync`, not this workflow. It runs
+# alongside the compose `deploy` job until the Phase 6/8 cutovers retire the
+# compose legs.
+#
+# All jobs run on the ThinkPad runner: this repo is private, so GitHub-hosted
+# minutes are billed, and the gate was the last non-trivial billed job left
+# after ci.yml/test.yml moved. There is only ONE runner, so the jobs
+# serialize (gate releases it before the next job claims it) and CI on an
+# open PR can queue ahead of a deploy.
+
+on:
+  push:
+    branches: [dev, main]
+    # The tag-bump commits from build-push touch only the overlays; never
+    # re-run CD for them. (GITHUB_TOKEN pushes cannot retrigger workflows
+    # anyway; this also covers a human hand-editing an overlay.)
+    paths-ignore:
+      - 'deploy/k8s/overlays/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per-branch: dev and main deploy independent stacks, so they may run at once,
+  # but never let two deploys of the SAME env race on the box.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Pre-deploy gate
+    runs-on: [self-hosted, thinkpad]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - run: go build ./...
+      - run: go test ./...
+
+  # NO compose deploy job any more. Staging moved to k3s in Phase 6 and prod
+  # followed in Phase 8, so `build-push` below is the entire deploy path for
+  # both: images go to the loopback registry, the overlay tag is bumped, and
+  # Argo CD rolls the pods (staging automatically, prod on manual sync).
+  #
+  # It was deleted rather than gated because on 2026-07-22 a merge to main ran
+  # it minutes after the prod cutover and RESTARTED the deliberately-stopped
+  # compose prod stack. That put two schedulers side by side, both scraping and
+  # both spending Gemini, until it was stopped by hand. Any `if:` condition
+  # narrow enough to be safe would have left the job with nothing to do.
+  #
+  # The stopped compose stacks stay on the box as the rollback target. Rolling
+  # back is deliberate and manual (`docker compose -p jsa-prod start` plus the
+  # cloudflared revert); it is not something CI should ever do on a push.
+
+  build-push:
+    name: Build k8s images + bump tags
+    needs: gate
+    runs-on: [self-hosted, thinkpad]
+    # Needed to push the tag-bump commit back to the triggering branch. The
+    # push uses the workflow's own GITHUB_TOKEN (persisted by checkout), so
+    # no PAT exists and the push can never retrigger a workflow.
+    permissions:
+      contents: write
+    timeout-minutes: 30
+    steps:
+      # Default checkout ref is github.sha, which is exactly what we want:
+      # the image content must match the SHA baked into its tag even if the
+      # branch has moved on (the newer push gets its own queued run).
+      - uses: actions/checkout@v6
+      - name: Build + push images to the loopback registry
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_SHA::12}"
+          # Plain docker build: the runner's daemon layer cache is shared
+          # with the compose deploys of the same Dockerfiles. Never use
+          # type=gha cache on this box (see #604).
+          docker build -f go-backend.Dockerfile \
+            -t "localhost:5000/jsa/go-backend:${TAG}" .
+          docker build -f scraper-service/Dockerfile \
+            -t "localhost:5000/jsa/scraper-service:${TAG}" .
+          docker push "localhost:5000/jsa/go-backend:${TAG}"
+          docker push "localhost:5000/jsa/scraper-service:${TAG}"
+      - name: Bump overlay image tags
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_SHA::12}"
+          BRANCH='${{ github.ref_name }}'
+          ENV='${{ github.ref_name == 'main' && 'prod' || 'staging' }}'
+          FILE="deploy/k8s/overlays/${ENV}/kustomization.yaml"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # The bump lands on the CURRENT branch tip, not github.sha, so a
+          # branch that moved during the build still fast-forwards. Retry
+          # covers a push racing in between fetch and push.
+          for attempt in 1 2 3; do
+            git fetch origin "$BRANCH"
+            git checkout -B tag-bump FETCH_HEAD
+            # sed, not `kustomize edit set image`: kustomize rewrites the
+            # whole file in its own style, which drops comments and fights
+            # the repo-wide prettier check (the #605 failure mode).
+            sed -i -E "s/^([[:space:]]*newTag:) .*/\1 ${TAG}/" "$FILE"
+            test "$(grep -c "newTag: ${TAG}\$" "$FILE")" -eq 2
+            if git diff --quiet -- "$FILE"; then
+              echo "Overlay already at ${TAG}; nothing to bump."
+              exit 0
+            fi
+            git add "$FILE"
+            git commit -m "chore(deploy): bump ${ENV} images to ${TAG} [skip ci]"
+            if git push origin "tag-bump:${BRANCH}"; then
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}); refetching."
+          done
+          exit 1
+
+  observability:
+    name: Reconcile observability stack
+    needs: gate
+    # dev ONLY. The shared jsa-observability stack (Prometheus + Grafana + Loki)
+    # monitors BOTH envs and is iterated on constantly, so it tracks dev rather
+    # than waiting on a manual main promotion. It has its own checkout, separate
+    # from the app trees: see scripts/deploy-observability.sh for why.
+    #
+    # Until Phase 6 this rode the tail of the staging deploy, which no longer
+    # runs (that job is prod-only now) -- leaving the stack with no CD at all.
+    if: github.ref_name == 'dev'
+    runs-on: [self-hosted, thinkpad]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Reconcile jsa-observability from dev
+        run: |
+          set -euo pipefail
+          # Run from a copy outside the deploy tree; the script git-resets that
+          # tree and must not rewrite itself mid-run.
+          cp "$GITHUB_WORKSPACE/scripts/deploy-observability.sh" "$RUNNER_TEMP/jsa-obs.sh"
+          chmod +x "$RUNNER_TEMP/jsa-obs.sh"
+          "$RUNNER_TEMP/jsa-obs.sh" dev

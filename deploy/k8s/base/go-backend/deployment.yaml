@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-backend
+  labels:
+    app: go-backend
+spec:
+  # HARD RULE: one replica, Recreate. Two live copies double-scrape and
+  # double-spend Gemini (single-writer cron schedulers), and the RWO volume
+  # is shared with the scraper. This is a single-node cluster; a rollout is
+  # a short, deliberate gap, not an outage class we can engineer away.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: go-backend
+  template:
+    metadata:
+      labels:
+        app: go-backend
+    spec:
+      securityContext:
+        # uid/gid 1000 matches the on-disk ownership rsynced from the compose
+        # checkouts (jake is uid 1000 on the box). The distroless static
+        # binary runs fine under any uid.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: go-backend
+          image: localhost:5000/jsa/go-backend:latest
+          ports:
+            - name: dashboard
+              containerPort: 3131
+            - name: metrics
+              containerPort: 9090
+            # 8090 (scrape trigger) is pod-internal on purpose: the dashboard
+            # posts to it over localhost, nothing else should reach it.
+          envFrom:
+            - configMapRef:
+                name: jsa-config
+            - secretRef:
+                name: jsa-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # /healthz is auth-exempt and cheap (internal/dashboard/server.go).
+          # Deliberately NOT the `/server healthcheck` subcommand the compose
+          # healthcheck uses: that one round-trips Postgres, and a transient
+          # DB blip must not restart-loop the pod.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: dashboard
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: dashboard
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: dashboard
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            # Seeded from cadvisor: idles at 20-30Mi. Memory limit is the OOM
+            # containment on a shared box; no CPU limit on a single node
+            # (requests handle scheduling, limits would only add throttling).
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: jsa-data
+              subPath: data
+              mountPath: /app/data
+            - name: jsa-data
+              subPath: context
+              mountPath: /app/.context
+            - name: jsa-data
+              subPath: logs
+              mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: jsa-data
+          persistentVolumeClaim:
+            claimName: jsa-data
+        - name: tmp
+          emptyDir: {}

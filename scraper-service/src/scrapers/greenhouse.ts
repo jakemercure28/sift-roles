@@ -5,6 +5,7 @@
  */
 import { stripHtml } from '../lib/html.js';
 import { scrapeCompanies } from '../lib/companies.js';
+import type { ScrapeCompaniesOptions } from '../lib/companies.js';
 import { makeJobLead } from '../lib/joblead.js';
 import { companyConfig } from '../lib/config.js';
 import type { JobLead } from '../types.js';
@@ -18,9 +19,16 @@ interface GreenhouseJob {
   updated_at?: string;
 }
 
-export async function scrapeGreenhouse(): Promise<JobLead[]> {
-  return scrapeCompanies<GreenhouseJob>({
-    companies: companyConfig().GREENHOUSE_COMPANIES,
+/**
+ * The greenhouse fetch/parse/map config for an explicit company list. Exported
+ * so board mode scrapes arbitrary registry boards with the exact same mapping
+ * (and therefore identical derived job ids) as the per-tenant path.
+ */
+export function greenhouseOptions(
+  companies: string[]
+): ScrapeCompaniesOptions<GreenhouseJob> {
+  return {
+    companies,
     platform: 'greenhouse',
     buildUrl: (company) =>
       `https://boards-api.greenhouse.io/v1/boards/${company}/jobs?content=true`,
@@ -45,5 +53,11 @@ export async function scrapeGreenhouse(): Promise<JobLead[]> {
         postedAt: job.updated_at || '',
       });
     },
-  });
+  };
+}
+
+export async function scrapeGreenhouse(): Promise<JobLead[]> {
+  return scrapeCompanies<GreenhouseJob>(
+    greenhouseOptions(companyConfig().GREENHOUSE_COMPANIES)
+  );
 }

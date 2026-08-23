@@ -66,6 +66,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #9C9C9C;
@@ -212,6 +214,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #4A4A4A;
@@ -358,6 +362,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #4A4A4A;
@@ -503,6 +509,8 @@
   --ats-ashby: #6E66A6; --ats-ashby-rgb: 110, 102, 166;
   --ats-lever: #9C7E3A; --ats-lever-rgb: 156, 126, 58;
   --ats-workday: #5470A0; --ats-workday-rgb: 84, 112, 160;
+  --ats-gem: #3E8E8E; --ats-gem-rgb: 62, 142, 142;
+  --ats-smartrecruiters: #B15E3F; --ats-smartrecruiters-rgb: 177, 94, 63;
 
   /* Score ramp — tinted chip for scores 7 and below (grays darker in light mode) */
   --score-good: #9C9C9C;

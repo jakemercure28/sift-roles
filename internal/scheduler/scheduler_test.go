@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -119,7 +121,7 @@ func TestRunOnceForUserSeedsGlobalJobsBeforeDiscovery(t *testing.T) {
 
 	s := New(scraper.New(srv.URL, 5*time.Second), repo, "/app/data", "@daily", nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
-	s.SetGlobalJobSeedLimit(10)
+	s.SetGlobalJobSeedLimit(10, 0)
 
 	s.SetDiscoveryHook(func(ctx context.Context, r *db.Repository) error {
 		n, err := r.CountUnscored()
@@ -161,5 +163,162 @@ func TestRunOnceForUserScrapesWhenDiscoveryFails(t *testing.T) {
 	}
 	if len(gotDirs) != 1 {
 		t.Fatalf("scrape should still run after discovery failure, got %d calls", len(gotDirs))
+	}
+}
+
+// TestRunOnceForUserBurstRunsAndJoins guards the onboarding burst contract: the
+// burst hook receives the seed keywords, runs during the cycle (concurrently
+// with discovery/scrape), and is joined before RunOnceForUser returns so the
+// caller's deferred context cancel can't kill it mid-call.
+func TestRunOnceForUserBurstRunsAndJoins(t *testing.T) {
+	repo, err := db.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer repo.Close()
+
+	var gotDirs []string
+	srv := fakeWorker(t, &gotDirs)
+	defer srv.Close()
+
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, "companies.json"),
+		[]byte(`{"SEARCH_TERMS":["marketing manager"]}`), 0o644); err != nil {
+		t.Fatalf("write companies.json: %v", err)
+	}
+
+	s := New(scraper.New(srv.URL, 5*time.Second), repo, dataDir, "@daily", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var (
+		burstDone atomic.Bool
+		gotKW     []string
+	)
+	s.SetOnboardBurstHook(func(ctx context.Context, r *db.Repository, kw []string) error {
+		gotKW = kw
+		time.Sleep(50 * time.Millisecond) // outlive the (instant) fake scrape
+		burstDone.Store(true)
+		return nil
+	})
+
+	if _, err := s.RunOnceForUser(context.Background(), db.LocalUser); err != nil {
+		t.Fatalf("RunOnceForUser: %v", err)
+	}
+	if !burstDone.Load() {
+		t.Fatal("RunOnceForUser returned before the burst finished (join missing)")
+	}
+	if len(gotKW) == 0 || gotKW[0] != "marketing" {
+		t.Fatalf("burst keywords = %v, want tokens from companies.json SEARCH_TERMS", gotKW)
+	}
+	if len(gotDirs) != 1 {
+		t.Fatalf("expected exactly 1 scrape call, got %d", len(gotDirs))
+	}
+}
+
+// TestRunOnceForUserBurstErrorDoesNotFailCycle guards the best-effort contract
+// for the burst, mirroring the discovery-failure test.
+func TestRunOnceForUserBurstErrorDoesNotFailCycle(t *testing.T) {
+	repo, err := db.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer repo.Close()
+
+	var gotDirs []string
+	srv := fakeWorker(t, &gotDirs)
+	defer srv.Close()
+
+	s := New(scraper.New(srv.URL, 5*time.Second), repo, "/app/data", "@daily", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.SetOnboardBurstHook(func(ctx context.Context, r *db.Repository, kw []string) error {
+		return errors.New("burst boom")
+	})
+
+	if _, err := s.RunOnceForUser(context.Background(), db.LocalUser); err != nil {
+		t.Fatalf("RunOnceForUser: %v", err)
+	}
+	if len(gotDirs) != 1 {
+		t.Fatalf("scrape should still run after burst failure, got %d calls", len(gotDirs))
+	}
+}
+
+// TestPostScrapeScoringHookRuns guards the scrape→score coupling on both paths:
+// each successful tenant scrape must be followed by one scoring-hook call.
+func TestPostScrapeScoringHookRuns(t *testing.T) {
+	repo, err := db.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer repo.Close()
+
+	var gotDirs []string
+	srv := fakeWorker(t, &gotDirs)
+	defer srv.Close()
+
+	s := New(scraper.New(srv.URL, 5*time.Second), repo, "/app/data", "@daily", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	scoreCalls := 0
+	s.SetScoringHook(func(ctx context.Context, r *db.Repository) error {
+		if len(gotDirs) != scoreCalls+1 {
+			t.Errorf("scoring hook ran before its scrape; scrapes=%d calls=%d", len(gotDirs), scoreCalls)
+		}
+		scoreCalls++
+		return nil
+	})
+
+	if _, err := s.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if scoreCalls != 1 {
+		t.Fatalf("scoring hook calls after RunOnce = %d, want 1", scoreCalls)
+	}
+
+	if _, err := s.RunOnceForUser(context.Background(), db.LocalUser); err != nil {
+		t.Fatalf("RunOnceForUser: %v", err)
+	}
+	if scoreCalls != 2 {
+		t.Fatalf("scoring hook calls after RunOnceForUser = %d, want 2", scoreCalls)
+	}
+}
+
+// TestPostScrapeScoringErrorDoesNotFailCycle: the chained pass is best-effort.
+func TestPostScrapeScoringErrorDoesNotFailCycle(t *testing.T) {
+	repo, err := db.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer repo.Close()
+
+	var gotDirs []string
+	srv := fakeWorker(t, &gotDirs)
+	defer srv.Close()
+
+	s := New(scraper.New(srv.URL, 5*time.Second), repo, "/app/data", "@daily", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.SetScoringHook(func(ctx context.Context, r *db.Repository) error {
+		return errors.New("scoring boom")
+	})
+
+	if _, err := s.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+}
+
+func TestBoardScrapeDeadline(t *testing.T) {
+	now := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	cycleDL := now.Add(60 * time.Minute)
+
+	// Normal: 15m reserve leaves the board scrape a deadline 15m before cycle end.
+	if bd, ok := boardScrapeDeadline(cycleDL, 15*time.Minute, now); !ok || !bd.Equal(now.Add(45*time.Minute)) {
+		t.Errorf("reserve 15m: got (%v, %v), want (%v, true)", bd, ok, now.Add(45*time.Minute))
+	}
+	// Disabled: reserve 0 -> do not bound.
+	if _, ok := boardScrapeDeadline(cycleDL, 0, now); ok {
+		t.Error("reserve 0 should not bound the board scrape")
+	}
+	// Reserve >= remaining budget: don't bound (would leave board scrape no time).
+	if _, ok := boardScrapeDeadline(now.Add(10*time.Minute), 15*time.Minute, now); ok {
+		t.Error("reserve exceeding remaining budget should not bound the board scrape")
 	}
 }

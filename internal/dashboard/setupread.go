@@ -51,20 +51,22 @@ func setupCompaniesHasSignal(path string) bool {
 		return false
 	}
 	var cfg struct {
-		SearchTerms []string `json:"SEARCH_TERMS"`
-		Greenhouse  []string `json:"GREENHOUSE_COMPANIES"`
-		Lever       []string `json:"LEVER_COMPANIES"`
-		Workable    []string `json:"WORKABLE_COMPANIES"`
-		Ashby       []string `json:"ASHBY_COMPANIES"`
-		Workday     []any    `json:"WORKDAY_COMPANIES"`
-		Rippling    []string `json:"RIPPLING_COMPANIES"`
+		SearchTerms     []string `json:"SEARCH_TERMS"`
+		Greenhouse      []string `json:"GREENHOUSE_COMPANIES"`
+		Lever           []string `json:"LEVER_COMPANIES"`
+		Workable        []string `json:"WORKABLE_COMPANIES"`
+		Ashby           []string `json:"ASHBY_COMPANIES"`
+		Workday         []any    `json:"WORKDAY_COMPANIES"`
+		Rippling        []string `json:"RIPPLING_COMPANIES"`
+		Gem             []string `json:"GEM_COMPANIES"`
+		SmartRecruiters []string `json:"SMARTRECRUITERS_COMPANIES"`
 	}
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return true
 	}
 	return len(cfg.SearchTerms) > 0 || len(cfg.Greenhouse) > 0 || len(cfg.Lever) > 0 ||
 		len(cfg.Workable) > 0 || len(cfg.Ashby) > 0 || len(cfg.Workday) > 0 ||
-		len(cfg.Rippling) > 0
+		len(cfg.Rippling) > 0 || len(cfg.Gem) > 0 || len(cfg.SmartRecruiters) > 0
 }
 
 func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {

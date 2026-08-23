@@ -78,9 +78,9 @@ func (s *Server) buildPage(filter, sortKey string, opts SearchOptions) (string, 
 	// concurrently and assemble after Wait. Each goroutine writes its own variable,
 	// so no shared-state locking is needed. errgroup returns the first error.
 	var (
-		body    string
-		stats   db.Stats
-		hbPtr   *db.Heartbeat
+		body  string
+		stats db.Stats
+		hbPtr *db.Heartbeat
 	)
 	var g errgroup.Group
 	g.Go(func() error {

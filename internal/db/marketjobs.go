@@ -1,12 +1,30 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 // This file ports lib/market-jobs.js: the job queries behind the Market Research
 // view. liveMarketWhere keeps the "live" cohort (not in a terminal state).
 
 const liveMarketWhere = `status NOT IN ('archived','closed','rejected','ghosted')
 	AND COALESCE(stage, '') NOT IN ('archived','closed','rejected','ghosted')`
+
+// marketDescTruncate caps how many characters of each description the Market
+// Research queries pull over the pooler. The only consumers (classifySeniority,
+// isAccessible, marketMatchesTerm, parseYearsFromDescription) scan the
+// seniority/requirements block near the top of a JD, and the Gemini prompt
+// hard-caps each JD at 600 chars, so 800 covers every reader while cutting the
+// per-row payload ~3.7x versus the old 3000. This truncated text is the single
+// largest Supabase egress source, so the cap lives in one place.
+const marketDescTruncate = 800
+
+// marketSeniorityCols is the shared SELECT list for the seniority/research job
+// queries, with the description truncated to marketDescTruncate in SQL.
+var marketSeniorityCols = fmt.Sprintf(
+	`id, title, company, substr(description, 1, %d) AS description, score, status, applied_at, stage, rejected_from_stage, location, posted_at`,
+	marketDescTruncate)
 
 // MarketSeniorityJob is a jobs row as the seniority breakdown reads it.
 type MarketSeniorityJob struct {
@@ -51,13 +69,13 @@ func scanSeniorityJobs(rows Rows) ([]MarketSeniorityJob, error) {
 }
 
 // LiveMarketSeniorityJobs ports getLiveMarketSeniorityJobs. The description is
-// truncated to 3000 chars in SQL, matching AllTimeMarketSeniorityJobs: the only
-// consumers of the text are classifySeniority and isAccessible (regexes over the
-// seniority/requirements section near the top of a JD), so shipping full multi-KB
-// JDs over the remote pooler was wasted egress.
+// truncated to marketDescTruncate chars in SQL: the only consumers of the text are
+// classifySeniority and isAccessible (regexes over the seniority/requirements
+// section near the top of a JD), so shipping full multi-KB JDs over the remote
+// pooler was wasted egress.
 func (r *Repository) LiveMarketSeniorityJobs() ([]MarketSeniorityJob, error) {
 	rows, err := r.query(`
-		SELECT id, title, company, substr(description, 1, 3000) AS description, score, status, applied_at, stage, rejected_from_stage, location, posted_at
+		SELECT `+marketSeniorityCols+`
 		FROM jobs WHERE `+liveMarketWhere+`
 		AND user_id = ?
 		ORDER BY score DESC, created_at DESC`, r.userID)
@@ -69,14 +87,14 @@ func (r *Repository) LiveMarketSeniorityJobs() ([]MarketSeniorityJob, error) {
 
 // LiveMarketResearchJobs ports getLiveMarketResearchJobs: live rows with a
 // substantial description, used as the Gemini/audit JD sample. The description is
-// truncated to 3000 chars in SQL: the Gemini prompt hard-caps each JD at 600 chars
+// truncated to marketDescTruncate chars in SQL: the Gemini prompt hard-caps each JD at 600 chars
 // (buildMarketResearchPrompt) and the audit's marketMatchesTerm scans the same
 // sample, so the full multi-KB JD text never reached either consumer and was pure
 // egress over the remote pooler. The length(description) > 100 filter still applies
 // to the untruncated column, so the cohort membership is unchanged.
 func (r *Repository) LiveMarketResearchJobs() ([]MarketSeniorityJob, error) {
 	rows, err := r.query(`
-		SELECT id, title, company, substr(description, 1, 3000) AS description, score, status, applied_at, stage, rejected_from_stage, location, posted_at
+		SELECT `+marketSeniorityCols+`
 		FROM jobs WHERE `+liveMarketWhere+`
 		AND description IS NOT NULL AND length(description) > 100
 		AND user_id = ?
@@ -88,17 +106,23 @@ func (r *Repository) LiveMarketResearchJobs() ([]MarketSeniorityJob, error) {
 }
 
 // AllTimeMarketSeniorityJobs ports getAllTimeMarketSeniorityJobs. The description
-// is truncated in SQL: this query spans every titled job ever scraped, and the
-// only consumer of the text is parseYearsFromDescription (a regex over the
-// requirements section near the top of a JD). Shipping full multi-KB JDs for
-// every all-time row was the dominant cost of the slow Market Research load over
-// the remote pooler; 3000 chars covers where YOE phrases appear.
-func (r *Repository) AllTimeMarketSeniorityJobs() ([]MarketSeniorityJob, error) {
+// is truncated in SQL (marketDescTruncate): the only consumer of the text is
+// parseYearsFromDescription (a regex over the requirements section near the top of
+// a JD). windowDays > 0 bounds the scan to rows created in the last windowDays so
+// the read does not grow unbounded as the table accumulates years of listings and
+// re-ship them on every rebuild; windowDays <= 0 keeps the full all-time scope.
+// The seniority/YOE distribution stays representative on a rolling window.
+func (r *Repository) AllTimeMarketSeniorityJobs(windowDays int) ([]MarketSeniorityJob, error) {
+	where := `title IS NOT NULL AND TRIM(title) != '' AND user_id = ?`
+	args := []any{r.userID}
+	if windowDays > 0 {
+		where += ` AND created_at >= datetime('now', '-' || ? || ' days')`
+		args = append(args, windowDays)
+	}
 	rows, err := r.query(`
-		SELECT id, title, company, substr(description, 1, 3000) AS description, score, status, applied_at, stage, rejected_from_stage, location, posted_at
-		FROM jobs WHERE title IS NOT NULL AND TRIM(title) != ''
-		AND user_id = ?
-		ORDER BY created_at DESC`, r.userID)
+		SELECT `+marketSeniorityCols+`
+		FROM jobs WHERE `+where+`
+		ORDER BY created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -116,12 +140,18 @@ func (r *Repository) CountLiveMarketResearchJobs() (int, error) {
 	return n, err
 }
 
-// CountAllTimeMarketResearchJobs ports countAllTimeMarketResearchJobs.
-func (r *Repository) CountAllTimeMarketResearchJobs() (int, error) {
+// CountAllTimeMarketResearchJobs ports countAllTimeMarketResearchJobs. windowDays
+// mirrors AllTimeMarketSeniorityJobs so the page's all-time count matches the
+// windowed sample it summarizes; windowDays <= 0 keeps the full all-time scope.
+func (r *Repository) CountAllTimeMarketResearchJobs(windowDays int) (int, error) {
+	where := `description IS NOT NULL AND length(description) > 100 AND user_id = ?`
+	args := []any{r.userID}
+	if windowDays > 0 {
+		where += ` AND created_at >= datetime('now', '-' || ? || ' days')`
+		args = append(args, windowDays)
+	}
 	var n int
-	err := r.queryRow(`
-		SELECT COUNT(*) FROM jobs WHERE description IS NOT NULL AND length(description) > 100
-		AND user_id = ?`, r.userID).Scan(&n)
+	err := r.queryRow(`SELECT COUNT(*) FROM jobs WHERE `+where, args...).Scan(&n)
 	return n, err
 }
 

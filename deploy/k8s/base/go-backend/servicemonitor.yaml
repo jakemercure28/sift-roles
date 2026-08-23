@@ -1,0 +1,28 @@
+# Replaces the compose Prometheus `go-backend` static_configs job.
+#
+# The operator already labels these series job="go-backend" (from the Service
+# name), which matches the compose job_name exactly, so nothing downstream has
+# to change. The one label the dashboards need and k8s does not supply for
+# free is env, derived from the namespace below.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: go-backend
+  labels:
+    app: go-backend
+spec:
+  selector:
+    matchLabels:
+      app: go-backend
+  endpoints:
+    - port: metrics
+      interval: 15s
+      relabelings:
+        # jsa-staging -> env="staging", jsa-prod -> env="prod". The
+        # app-pipeline dashboard filters every panel on env, and alerts.yml
+        # templates it into annotations. Deriving it from the namespace keeps
+        # this manifest identical in both overlays.
+        - sourceLabels: [__meta_kubernetes_namespace]
+          regex: 'jsa-(.*)'
+          targetLabel: env
+          replacement: '$1'

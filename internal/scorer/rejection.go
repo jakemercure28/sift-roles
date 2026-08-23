@@ -17,9 +17,9 @@ func (s *Scorer) Ask(ctx context.Context, prompt string, maxTokens int) (string,
 // porting scoreRejectionLikelihood in scorer.js. It is best-effort: the dashboard
 // calls it in the background after a pipeline transition.
 func (s *Scorer) ScoreRejection(ctx context.Context, job Job) (string, error) {
-	s.once.Do(s.load)
-	if s.loadErr != nil {
-		return "", s.loadErr
+	p := s.loadProfile()
+	if p.err != nil {
+		return "", p.err
 	}
 
 	location := job.Location
@@ -34,7 +34,7 @@ func (s *Scorer) ScoreRejection(ctx context.Context, job Job) (string, error) {
 	prompt := `You are a hiring manager reviewing a job application. Given the job listing and candidate resume below, identify the most likely reasons this application would be rejected.
 
 ## Candidate Resume
-` + s.resume + `
+` + p.resume + `
 
 ## Job Listing
 Title: ` + job.Title + `

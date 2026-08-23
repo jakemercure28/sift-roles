@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -242,6 +243,77 @@ func TestScoreUnscoredRespectsPerTenantHostCap(t *testing.T) {
 	}
 }
 
+// TestScoreUnscoredInactiveDailyLimitClampsKeepWarm is the regression guard for
+// idle tenants draining a shared key. MaxJobs caps one pass, so with many passes
+// a day an inactive tenant could spend far past its share; InactiveDailyLimit is
+// the daily bound that stops it. Here the ordinary per-tenant cap (150) would
+// allow 140 calls, but the keep-warm budget (30) allows 20.
+func TestScoreUnscoredInactiveDailyLimitClampsKeepWarm(t *testing.T) {
+	repo, _ := newRepo(t)
+	for i := 0; i < 40; i++ {
+		insertLead(t, repo, string(rune('a'+i%26))+strconv.Itoa(i), "Engineer")
+	}
+	// Simulate earlier passes today: 5 calls already spent, so 30 - 5 - 10 = 15 left.
+	for i := 0; i < 5; i++ {
+		if err := repo.RecordAPICall(scorer.Model); err != nil {
+			t.Fatalf("seed tenant usage: %v", err)
+		}
+	}
+	fake := &fakeScorer{fn: func(scorer.Job) (scorer.Result, error) { return res(7, "ok"), nil }}
+	out, err := ScoreUnscored(context.Background(), repo, fake,
+		ScoreConfig{DailyLimit: 500, Concurrency: 3, ArchiveThreshold: 4,
+			HostKey: true, HostDailyLimit: 500, HostPerTenantDailyLimit: 150,
+			MaxJobs: 100, InactiveDailyLimit: 30}, discardLogger())
+	if err != nil {
+		t.Fatalf("ScoreUnscored: %v", err)
+	}
+	if out.Scored != 15 {
+		t.Fatalf("result.Scored = %d, want 15 (clamped by inactive keep-warm daily limit)", out.Scored)
+	}
+}
+
+// TestScoreUnscoredInactiveDailyLimitNeverLoosens guards the direction of the
+// clamp: keep-warm may only tighten a tenant's budget. A value above the
+// ordinary per-tenant cap must not raise it.
+func TestScoreUnscoredInactiveDailyLimitNeverLoosens(t *testing.T) {
+	repo, _ := newRepo(t)
+	for i := 0; i < 30; i++ {
+		insertLead(t, repo, string(rune('a'+i%26))+strconv.Itoa(i), "Engineer")
+	}
+	fake := &fakeScorer{fn: func(scorer.Job) (scorer.Result, error) { return res(7, "ok"), nil }}
+	out, err := ScoreUnscored(context.Background(), repo, fake,
+		ScoreConfig{DailyLimit: 500, Concurrency: 3, ArchiveThreshold: 4,
+			HostKey: true, HostDailyLimit: 500, HostPerTenantDailyLimit: 15,
+			InactiveDailyLimit: 400}, discardLogger())
+	if err != nil {
+		t.Fatalf("ScoreUnscored: %v", err)
+	}
+	if out.Scored != 5 {
+		t.Fatalf("result.Scored = %d, want 5 (per-tenant cap still binds)", out.Scored)
+	}
+}
+
+// TestScoreUnscoredInactiveDailyLimitAppliesWithoutPerTenantCap covers the
+// self-host-style config where no per-tenant cap is set: the keep-warm budget
+// must still bind on its own.
+func TestScoreUnscoredInactiveDailyLimitAppliesWithoutPerTenantCap(t *testing.T) {
+	repo, _ := newRepo(t)
+	for i := 0; i < 30; i++ {
+		insertLead(t, repo, string(rune('a'+i%26))+strconv.Itoa(i), "Engineer")
+	}
+	fake := &fakeScorer{fn: func(scorer.Job) (scorer.Result, error) { return res(7, "ok"), nil }}
+	out, err := ScoreUnscored(context.Background(), repo, fake,
+		ScoreConfig{DailyLimit: 500, Concurrency: 3, ArchiveThreshold: 4,
+			HostKey: true, HostDailyLimit: 500, HostPerTenantDailyLimit: 0,
+			InactiveDailyLimit: 25}, discardLogger())
+	if err != nil {
+		t.Fatalf("ScoreUnscored: %v", err)
+	}
+	if out.Scored != 15 {
+		t.Fatalf("result.Scored = %d, want 15 (keep-warm budget binds alone)", out.Scored)
+	}
+}
+
 func TestScoreUnscoredHostKeyIgnoresGenericDailyCap(t *testing.T) {
 	repo, _ := newRepo(t)
 	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -372,4 +444,57 @@ func scalarInt(t *testing.T, conn *sql.DB, q string) int {
 		t.Fatalf("query %q: %v", q, err)
 	}
 	return n
+}
+
+func TestScoreUnscoredMaxJobsCap(t *testing.T) {
+	repo, _ := newRepo(t)
+	for _, id := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"} {
+		insertLead(t, repo, id, "Engineer "+id)
+	}
+
+	// Quota would allow all 10; the keep-warm cap clamps the pull to 4.
+	fake := &fakeScorer{fn: func(scorer.Job) (scorer.Result, error) { return res(7, "ok"), nil }}
+	out, err := ScoreUnscored(context.Background(), repo, fake,
+		ScoreConfig{DailyLimit: 500, Concurrency: 3, ArchiveThreshold: 4, MaxJobs: 4}, discardLogger())
+	if err != nil {
+		t.Fatalf("ScoreUnscored: %v", err)
+	}
+	if fake.calls != 4 {
+		t.Fatalf("scored %d jobs, want 4 (keep-warm cap)", fake.calls)
+	}
+	if out.Scored != 4 {
+		t.Fatalf("result.Scored = %d, want 4", out.Scored)
+	}
+}
+
+// TestHostQuotaAvailable covers the gate that keeps non-scoring consumers (the
+// market research cron) off an exhausted shared key. Before this existed the
+// cron fanned out per tenant after the wall and burned a 429 retry ladder each.
+func TestHostQuotaAvailable(t *testing.T) {
+	repo, _ := newRepo(t)
+	// 495 spent against a 500 ceiling leaves 5, which the 10-call reserve consumes.
+	for i := 0; i < 495; i++ {
+		if err := repo.RecordHostAPICall(scorer.Model); err != nil {
+			t.Fatalf("seed host usage: %v", err)
+		}
+	}
+	ok, used, err := HostQuotaAvailable(repo, 500)
+	if err != nil {
+		t.Fatalf("HostQuotaAvailable: %v", err)
+	}
+	if used != 495 {
+		t.Fatalf("hostUsed = %d, want 495", used)
+	}
+	if ok {
+		t.Fatal("want blocked: 500 - 485 - quotaReserve is not positive")
+	}
+	// The same tally against the old, wrong 2000 ceiling still has room, which is
+	// exactly why prod kept firing into the provider's real 500/day wall.
+	if ok, _, err = HostQuotaAvailable(repo, 2000); err != nil || !ok {
+		t.Fatalf("want allowed under a 2000 ceiling, got ok=%v err=%v", ok, err)
+	}
+	// An unconfigured ceiling (self-host) must not block the caller.
+	if ok, _, err = HostQuotaAvailable(repo, 0); err != nil || !ok {
+		t.Fatalf("want allowed when the host ceiling is unset, got ok=%v err=%v", ok, err)
+	}
 }

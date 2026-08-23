@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -68,6 +69,85 @@ func TestOnboardedTenantDirs(t *testing.T) {
 	// A missing storage root degrades to nil, not an error/panic.
 	if dirs := OnboardedTenantDirs(t.TempDir(), Postgres); dirs != nil {
 		t.Fatalf("OnboardedTenantDirs(empty base) = %v, want nil", dirs)
+	}
+}
+
+// TestRepairStalledProfiles covers the silent onboarding stall: a tenant who
+// uploaded a resume and closed the wizard before the search-terms step was
+// excluded from every background cron forever, with nothing logged and no error
+// anywhere. After the repair they must satisfy tenantProfileComplete and join
+// the fan-out.
+func TestRepairStalledProfiles(t *testing.T) {
+	base := t.TempDir()
+	const resume = "Jane Doe\nSenior Platform Engineer | Acme\nBuilt CI/CD pipelines.\n"
+
+	// The stall: resume uploaded, provisioned companies.json with empty lists,
+	// no .onboarded marker.
+	writeProfile(t, base, "tenant-stalled", map[string]string{
+		"resume.md":      resume,
+		"companies.json": `{"MAX_AGE_DAYS":20,"SEARCH_TERMS":[],"GREENHOUSE_COMPANIES":[]}`,
+	})
+	// Already complete: must not be touched.
+	writeProfile(t, base, "tenant-done", map[string]string{
+		"resume.md":      resume,
+		"companies.json": `{"SEARCH_TERMS":["devops"]}`,
+		".onboarded":     "2026-06-15T00:00:00Z\n",
+	})
+	// No resume: nothing to derive from, so it stays stalled rather than being
+	// seeded with invented terms.
+	writeProfile(t, base, "tenant-no-resume", map[string]string{
+		"companies.json": `{"SEARCH_TERMS":[]}`,
+	})
+	// A resume with no derivable role term is left for the wizard to handle.
+	writeProfile(t, base, "tenant-unparseable", map[string]string{
+		"resume.md": "...\n",
+	})
+
+	got := RepairStalledProfiles(base, Postgres)
+	if len(got) != 1 || got[0].UserID != "tenant-stalled" {
+		t.Fatalf("RepairStalledProfiles = %+v, want exactly tenant-stalled", got)
+	}
+	if len(got[0].Terms) == 0 {
+		t.Fatal("repaired profile carries no terms")
+	}
+
+	// The repaired tenant now passes the completeness check the fan-out uses.
+	dir := filepath.Join(base, "storage", "users", "tenant-stalled")
+	if !tenantProfileComplete(dir) {
+		t.Fatal("repaired profile still judged incomplete")
+	}
+	// Unrelated keys in companies.json survive the merge.
+	raw, err := os.ReadFile(filepath.Join(dir, "companies.json"))
+	if err != nil {
+		t.Fatalf("read repaired companies.json: %v", err)
+	}
+	var profile map[string]any
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatalf("repaired companies.json is not valid JSON: %v", err)
+	}
+	if profile["MAX_AGE_DAYS"] != float64(20) {
+		t.Fatalf("MAX_AGE_DAYS = %v, want 20 preserved", profile["MAX_AGE_DAYS"])
+	}
+	if terms, ok := profile["SEARCH_TERMS"].([]any); !ok || len(terms) == 0 {
+		t.Fatalf("SEARCH_TERMS = %v, want non-empty", profile["SEARCH_TERMS"])
+	}
+
+	// Idempotent: a second pass finds nothing left to repair.
+	if again := RepairStalledProfiles(base, Postgres); len(again) != 0 {
+		t.Fatalf("second RepairStalledProfiles = %+v, want none", again)
+	}
+	// The complete tenant's file was never rewritten.
+	doneRaw, err := os.ReadFile(filepath.Join(base, "storage", "users", "tenant-done", "companies.json"))
+	if err != nil {
+		t.Fatalf("read untouched companies.json: %v", err)
+	}
+	if string(doneRaw) != `{"SEARCH_TERMS":["devops"]}` {
+		t.Fatalf("completed tenant's companies.json was rewritten: %s", doneRaw)
+	}
+
+	// Self-host never scans the per-tenant root.
+	if r := RepairStalledProfiles(base, SQLite); r != nil {
+		t.Fatalf("RepairStalledProfiles(SQLite) = %+v, want nil", r)
 	}
 }
 

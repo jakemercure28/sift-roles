@@ -1,0 +1,68 @@
+# Promtail tails every Docker container on the host (via the Docker API) and ships
+# logs to Loki.
+#
+# SCOPE: Docker only. Since the Phase 6 k3s cutover, staging runs as pods and its
+# logs reach this same Loki from Grafana Alloy in-cluster
+# (deploy/argocd/apps/alloy.yaml), which reproduces the label set below on
+# purpose. Promtail is EOL and is deliberately NOT being rewritten: it retires
+# with this compose stack at Phase 8, when Alloy takes over everything.
+#
+# The app services already log one-line JSON (Go slog + Fastify/pino),
+# so we extract the level for a label and keep the rest of the structured fields
+# (msg, trace_id, user_id) in the line, queryable in Grafana with | json.
+#
+# Labels are kept deliberately low-cardinality: container, compose project, compose
+# service, and level. trace_id is NOT a label (it would explode cardinality); query
+# it as a field instead, e.g. {service="go-backend"} | json | trace_id="abc123".
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels:
+          ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: compose_project
+      - source_labels:
+          ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: service
+    pipeline_stages:
+      # Extract the level from both shapes the stack emits in a single regex, so
+      # no parser errors on the other shape: JSON ("level":"info" or the legacy
+      # numeric "level":30 from older pino) and logfmt (level=info, used by the
+      # Grafana/Loki monitoring containers). Lines with no level (e.g. cAdvisor's
+      # glog) simply don't match and fall through to "unknown" below.
+      - regex:
+          expression: '(?:"level":\s*"?|level=)(?P<level>\w+)'
+      # Collapse every level spelling to one lower-case vocabulary so Loki's
+      # "level" label has a single value per severity. Without this, info shows
+      # up as INFO (slog), info (pino/scrapers), and 30 (legacy pino numeric) as
+      # three separate series. Numeric pino codes are mapped to names; anything
+      # with no level at all becomes "unknown" instead of an empty/"Value" series.
+      - template:
+          source: level
+          template: >-
+            {{- if eq .Value "10" -}}trace
+            {{- else if eq .Value "20" -}}debug
+            {{- else if eq .Value "30" -}}info
+            {{- else if eq .Value "40" -}}warn
+            {{- else if eq .Value "50" -}}error
+            {{- else if eq .Value "60" -}}fatal
+            {{- else if eq .Value "" -}}unknown
+            {{- else -}}{{ .Value | ToLower }}
+            {{- end -}}
+      - labels:
+          level:

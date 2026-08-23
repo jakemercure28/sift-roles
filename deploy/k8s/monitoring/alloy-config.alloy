@@ -1,0 +1,91 @@
+discovery.kubernetes "pods" {
+  role = "pod"
+}
+
+discovery.relabel "jsa_pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  // App namespaces only. Never ship argocd/kube-system chatter.
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    regex         = "jsa-.*"
+    action        = "keep"
+  }
+
+  // The honest label.
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+
+  // Compat alias. The logs dashboard filters on
+  // {compose_project=~"jsa-.*"}, and the namespaces are named
+  // jsa-staging / jsa-prod, so reusing the label keeps that
+  // dashboard working unedited across both worlds. It IS a lie
+  // on a pod, hence `namespace` above carries the truth too.
+  // Retire both this and the dashboard query at Phase 8.
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "compose_project"
+  }
+
+  // Matches promtail's `service` values exactly: the compose
+  // service names are go-backend / scraper-service, and so are
+  // the pod `app` labels.
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+}
+
+// Reads through the kubelet API rather than mounting hostPath
+// log dirs.
+loki.source.kubernetes "jsa_pods" {
+  targets    = discovery.relabel.jsa_pods.output
+  forward_to = [loki.process.level.receiver]
+}
+
+// Same level extraction promtail does, kept deliberately
+// identical so `level` has ONE value per severity across Docker
+// and pod logs.
+loki.process "level" {
+  // Both shapes in one regex, so neither errors on the other:
+  // JSON ("level":"info" or legacy numeric "level":30) and
+  // logfmt (level=info). Lines with no level simply don't match
+  // and fall through to "unknown".
+  stage.regex {
+    expression = "(?:\"level\":\\s*\"?|level=)(?P<level>\\w+)"
+  }
+
+  stage.template {
+    source = "level"
+    template = "{{- if eq .Value \"10\" -}}trace{{- else if eq .Value \"20\" -}}debug{{- else if eq .Value \"30\" -}}info{{- else if eq .Value \"40\" -}}warn{{- else if eq .Value \"50\" -}}error{{- else if eq .Value \"60\" -}}fatal{{- else if eq .Value \"\" -}}unknown{{- else -}}{{ .Value | ToLower }}{{- end -}}"
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.compose_loki.receiver]
+}
+
+// trace_id is deliberately NOT a label (cardinality); query it
+// as a field:
+//   {service="go-backend"} | json | trace_id="abc123"
+loki.write "compose_loki" {
+  endpoint {
+    url = "http://compose-loki:3100/loki/api/v1/push"
+  }
+}

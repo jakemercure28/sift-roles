@@ -1,0 +1,18 @@
+# Points the base `supabase-db` Service at the host's supabase-staging
+# Postgres, published on the Tailscale IP port 5433 (Phase 6 pre-flight adds
+# `100.87.101.41:5433:5432` to the supabase-staging compose db service).
+# ufw allows the pod CIDR (10.42.0.0/16) through.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: supabase-db-1
+  labels:
+    kubernetes.io/service-name: supabase-db
+addressType: IPv4
+endpoints:
+  - addresses:
+      - 100.87.101.41
+    conditions:
+      ready: true
+ports:
+  - port: 5433

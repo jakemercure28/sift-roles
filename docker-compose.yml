@@ -74,7 +74,7 @@ services:
       # host loopback via the METRICS_PORT mapping above (kept off the public mux).
       METRICS_ADDR: ':9090'
       SCRAPER_URL: http://scraper-service:4040
-      SCRAPE_SCHEDULE: '0 */6 * * *'
+      SCRAPE_SCHEDULE: '0 */3 * * *'
       # On-demand scrape trigger: served in-process; the dashboard's "Scrape now"
       # button posts here over loopback. Not published to the host.
       TRIGGER_ADDR: ':8090'
@@ -93,21 +93,43 @@ services:
       # Public multi-tenant tier: every tenant scores on the shared host key, so
       # this caps how many host-key Gemini calls a SINGLE tenant may spend per day
       # — the per-user fairness cap that stops one signup draining the shared key
-      # for everyone. Set above normal usage (~100-315/day) once the host key is on
-      # a BILLED Gemini project with a budget alert; on the free 500/day tier keep
-      # it low (covers ~1-2 tenants). 0 disables (self-host default).
-      GEMINI_HOST_PER_TENANT_DAILY_LIMIT: '400'
+      # for everyone. At SCORING_BATCH_SIZE=1 this is roughly jobs scored per
+      # tenant per day; with GEMINI_API_KEY_OVERFLOW set it also bounds each
+      # tenant's share of the paid spillover. Overridable from .env; 0 disables
+      # (self-host default).
+      GEMINI_HOST_PER_TENANT_DAILY_LIMIT: '${GEMINI_HOST_PER_TENANT_DAILY_LIMIT:-150}'
+      # Daily budget for a tenant the activity gate marks inactive (nobody has
+      # opened that dashboard inside SCORING_ACTIVE_WINDOW_DAYS). SCORING_INACTIVE_TOP_N
+      # caps a single pass, not a day: the pipeline runs a scoring pass per scrape
+      # cycle, so without this an idle tenant spends top-N calls EVERY cycle and a
+      # handful of them exhaust the shared key before an active tenant is served.
+      # Keep it near the top-N so keep-warm costs about one pass a day.
+      # 0 disables (self-host default).
+      GEMINI_HOST_INACTIVE_DAILY_LIMIT: '${GEMINI_HOST_INACTIVE_DAILY_LIMIT:-0}'
       # Copy recent global job descriptions into a tenant's pending queue before
       # a user-triggered scrape. This gives first-run users immediate jobs to rank
       # while discovery/scraping catches up. 0 disables.
       GLOBAL_JOB_SEED_LIMIT: '100'
+      # Onboarding fast lane: score a signup's best-matching seeded jobs
+      # immediately, concurrently with the first scrape, so a new tenant sees
+      # scored roles within minutes of submitting a resume. The burst bypasses
+      # the per-tenant fairness cap above (never the host-global cap), so this
+      # is also the most one signup can spend. It stays free-key-first and only
+      # reaches GEMINI_API_KEY_OVERFLOW during the free key's post-429 cooldown
+      # (or when ONBOARD_BURST_PREFER_OVERFLOW=1 forces it). SCORE_AFTER_SCRAPE
+      # (default on) then chains every tenant's scrape into a budgeted scoring
+      # pass, with the 15 */6 scoring cron kept as the sweeper.
+      ONBOARD_BURST_LIMIT: '${ONBOARD_BURST_LIMIT:-25}'
     restart: unless-stopped
     healthcheck:
+      # The healthcheck subcommand opens a repo and runs ActiveTenant against
+      # Postgres, so each run is a pooler round trip. 5m (was 1m) keeps liveness
+      # detection adequate while cutting that to ~290/day from ~1,440/day.
       test: ['CMD', '/server', 'healthcheck']
-      interval: 1m
+      interval: 5m
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
 
 volumes:
   job_search_db:

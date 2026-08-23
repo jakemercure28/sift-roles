@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"job-search-automation/internal/db"
 )
 
 // htmlEscaper mirrors escapeHtml in lib/utils.js: &, <, >, ", ' in that order.
@@ -39,6 +41,7 @@ type Job struct {
 	AppliedAt         string
 	RejectedFromStage string
 	RejectedAt        string
+	ArchiveReason     string
 }
 
 // SearchOptions carries the dashboard list query state (q, minScore, page).
@@ -148,6 +151,20 @@ var pipelineLabels = map[string]string{
 	"closed":       "Closed",
 	"rejected":     "Rejected",
 	"ghosted":      "Ghosted",
+}
+
+// archiveReasonLabels maps the auto-archive vocabulary (internal/db/archivereason.go)
+// to the badge text shown on archived job cards. Unknown values render as-is.
+var archiveReasonLabels = map[string]string{
+	db.ArchiveReasonDedupRepost:       "Duplicate: repost",
+	db.ArchiveReasonDedupPending:      "Duplicate: pending copy",
+	db.ArchiveReasonDedupAlternate:    "Duplicate: alt source",
+	db.ArchiveReasonCanonicalized:     "Duplicate: canonical kept",
+	db.ArchiveReasonUnsupported:       "Duplicate: unsupported ATS",
+	db.ArchiveReasonLowScore:          "Auto: low score",
+	db.ArchiveReasonPrefilterNonUS:    "Auto: not open to US",
+	db.ArchiveReasonPrefilterLocation: "Auto: location mismatch",
+	db.ArchiveReasonStaleUnscored:     "Auto: expired unscored",
 }
 
 // pipelineValue mirrors helpers.pipelineValue.

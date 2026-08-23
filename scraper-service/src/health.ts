@@ -1,15 +1,19 @@
 /**
  * Work-health tracking for the scraper worker.
  *
- * The Docker healthcheck hits GET /health every 30s, but a shallow "process is
- * up" answer hides the failure that actually matters: a Playwright scrape that
- * leaks/hangs while Fastify's event loop stays responsive. There, /health would
- * keep returning 200 and Docker would never restart the container.
+ * A shallow "process is up" answer hides the failure that actually matters: a
+ * scrape that leaks/hangs while Fastify's event loop stays responsive. There, a
+ * plain liveness answer stays 200 and nothing ever surfaces the hang.
  *
  * ScrapeLiveness closes that gap. Each scrape's start time is recorded while it
- * runs and cleared when it settles, so a scrape stuck past the threshold leaves a
- * stale start time behind. /health reports `stuck` off that, returns 503, and the
- * existing healthcheck (3 retries) restarts the container.
+ * runs and cleared when it settles, so a scrape stuck past the threshold leaves
+ * a stale start time behind. GET /health reports `stuck` off that and returns
+ * 503.
+ *
+ * /health is a *reporting* endpoint, not a restart trigger. The kubelet probes
+ * the shallow GET /livez instead. Restarting the container does not un-stick a
+ * slow board pass, it just discards the pass's work, so `stuck` is something to
+ * observe and alert on rather than something to kill the process over.
  *
  * The Go backend serializes /scrape today, but we track a multiset of start times
  * rather than a single flag so overlapping scrapes never lose each other's state.
@@ -31,7 +35,9 @@ export interface LivenessSnapshot {
 
 export class ScrapeLiveness {
   private readonly thresholdMs: number;
-  private readonly starts: number[] = [];
+  // Entry objects rather than raw timestamps: two scrapes starting in the same
+  // millisecond would collide under indexOf on a number[].
+  private readonly starts = new Set<{ at: number }>();
   private lastSuccessAt: number | null = null;
 
   constructor(thresholdMs: number = DEFAULT_STUCK_MS) {
@@ -42,26 +48,36 @@ export class ScrapeLiveness {
    * Run `fn` while counting it as an in-flight scrape. The start time is recorded
    * on entry and removed once `fn` settles (resolve or reject), so a hung `fn`
    * leaves its start time behind for `snapshot` to flag.
+   *
+   * When `signal` aborts, the entry is dropped immediately even though `fn` may
+   * still be running. That is deliberate: the Go client gives up on a chunk at
+   * SCRAPE_TIMEOUT_MINUTES (default 10) while the stuck threshold here is 15, so
+   * work the caller already walked away from used to keep aging on our books and
+   * drive the service to `degraded` for a chunk nobody was waiting on.
    */
-  async track<T>(fn: () => Promise<T>): Promise<T> {
-    const startedAt = Date.now();
-    this.starts.push(startedAt);
+  async track<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const entry = { at: Date.now() };
+    this.starts.add(entry);
+    const abandon = () => this.starts.delete(entry);
+    signal?.addEventListener('abort', abandon, { once: true });
     try {
       const result = await fn();
       this.lastSuccessAt = Date.now();
       return result;
     } finally {
-      const i = this.starts.indexOf(startedAt);
-      if (i !== -1) this.starts.splice(i, 1);
+      this.starts.delete(entry);
+      signal?.removeEventListener('abort', abandon);
     }
   }
 
   snapshot(now: number = Date.now()): LivenessSnapshot {
     const oldestStart =
-      this.starts.length > 0 ? Math.min(...this.starts) : null;
+      this.starts.size > 0
+        ? Math.min(...[...this.starts].map((e) => e.at))
+        : null;
     const oldestAgeMs = oldestStart === null ? null : now - oldestStart;
     return {
-      inFlight: this.starts.length,
+      inFlight: this.starts.size,
       oldestAgeMs,
       lastSuccessAt: this.lastSuccessAt,
       stuck: oldestAgeMs !== null && oldestAgeMs > this.thresholdMs,

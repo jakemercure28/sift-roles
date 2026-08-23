@@ -1,0 +1,289 @@
+# kube-prometheus-stack: Prometheus operator + Prometheus + kube-state-metrics.
+#
+# Deliberately trimmed. This cluster shares a box with the compose
+# jsa-observability stack, which keeps owning Grafana, Loki, the host
+# node-exporter and prod's metrics until Phase 8. Everything that stack
+# already does well is DISABLED here rather than run twice:
+#
+#   nodeExporter  -> compose node-exporter already scrapes this same host
+#   alertmanager  -> no receiver is configured yet; alerts.yml in compose
+#                    Prometheus remains the one alerting brain (see below)
+#
+# grafana is ENABLED, but for a DIFFERENT job than the compose Grafana. The
+# compose one stays the app/business UI (jsa_* + host node-exporter + logs);
+# this one carries the cluster-infra view (pods/nodes/namespaces/workloads
+# from kube-state-metrics + kubelet cAdvisor) that the compose side
+# deliberately does not, reading kps-prometheus directly. At Phase 8 the two
+# converge onto this Prometheus. See docs/k8s-migration.md.
+#
+# Staging's jsa_* metrics are remote-written into the compose Prometheus, so
+# the existing app-pipeline dashboard and alerts.yml cover staging again with
+# zero dashboard edits. See docs/k8s-migration.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 87.16.1
+    helm:
+      values: |
+        fullnameOverride: kps
+
+        # --- Already covered by the compose stack; do not run twice ---
+        nodeExporter:
+          enabled: false
+
+        # Alertmanager is the cluster's ONLY alert delivery path. Before it was
+        # turned on, rules in both stacks fired into a UI nobody was watching:
+        # no receiver here, no alerting block in the compose Prometheus, and
+        # msmtp failing Gmail auth nightly. An alert that reaches no one is not
+        # an alert.
+        #
+        # Everything routes to the opsagent webhook, which investigates and
+        # either applies an allowlisted remediation or opens a GitHub issue.
+        # GitHub is the notification channel on purpose: its own emails already
+        # reach Jake, so this does not depend on the broken msmtp path.
+        #
+        # The compose Prometheus also sends here (see
+        # observability/prometheus/prometheus.yml), so both rule sets converge
+        # on one receiver.
+        alertmanager:
+          # DISABLED until the opsagent workload actually exists. Do not flip
+          # this back to true on its own.
+          #
+          # ORDERING TRAP, learned the hard way: this app is auto-sync and the
+          # root app tracks `dev`, so merging a change here deploys Alertmanager
+          # to PROD within minutes, with no separate decision. The opsagent app
+          # it routes to is manual-sync and needs a sealed secret that only Jake
+          # can produce, so enabling this first left prod with an Alertmanager
+          # retrying into NXDOMAIN and dropping a real firing alert
+          # (BoardPlatformCoverageCollapsed) every 10 minutes for ~17h.
+          #
+          # Correct order: create the sealed secret, sync the opsagent app,
+          # confirm the opsagent Service resolves, THEN set this to true and
+          # uncomment the alerting block in
+          # observability/prometheus/prometheus.yml in the same change.
+          enabled: false
+          # NodePort so the compose Prometheus, which runs on the host outside
+          # the cluster, can deliver its jsa_* alerts here. A ClusterIP would be
+          # unreachable from the docker bridge, and loopback-published ports are
+          # not reachable via host-gateway on native Linux (see the note in
+          # observability/docker-compose.observability.yml). A NodePort binds on
+          # all node interfaces, so the host gateway route works.
+          service:
+            type: NodePort
+            nodePort: 30903
+          alertmanagerSpec:
+            replicas: 1
+            retention: 120h
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 128Mi
+            # Single node, and the alert history that matters is in the GitHub
+            # issues the agent files. A PVC here would buy little.
+            storage: {}
+          config:
+            global:
+              resolve_timeout: 5m
+            route:
+              receiver: opsagent
+              # Group by alert name so one problem is one investigation. The
+              # agent's own fingerprint dedupe is derived from these names.
+              group_by: ['alertname']
+              # Wait for correlated alerts before firing: a scrape failure and
+              # a distribution stall arriving together diagnose each other, and
+              # investigating them separately doubles the token spend for one
+              # underlying cause.
+              group_wait: 2m
+              group_interval: 10m
+              # Long, because a re-delivery costs a full investigation. The
+              # agent applies its own 45m per-fingerprint cooldown on top.
+              repeat_interval: 12h
+              routes:
+                # Watchdog fires permanently by design as a proof-of-life for
+                # the alert pipeline. Investigating it would burn a run every
+                # repeat_interval forever.
+                - receiver: 'null'
+                  matchers:
+                    - alertname = "Watchdog"
+                # InfoInhibitor exists only to suppress other alerts.
+                - receiver: 'null'
+                  matchers:
+                    - alertname = "InfoInhibitor"
+            inhibit_rules:
+              # A critical alert already implies its warning-level siblings; do
+              # not open a second investigation for the same object.
+              - source_matchers:
+                  - severity = "critical"
+                target_matchers:
+                  - severity = "warning"
+                equal: ['namespace', 'alertname']
+            receivers:
+              - name: 'null'
+              - name: opsagent
+                webhook_configs:
+                  - url: http://opsagent.monitoring.svc.cluster.local:8091/alert
+                    # The agent acknowledges immediately and investigates in the
+                    # background, so a retry here would only duplicate runs.
+                    send_resolved: false
+                    max_alerts: 20
+
+        # Cluster-infra dashboards (kube-state-metrics + kubelet cAdvisor),
+        # reading kps-prometheus directly. Ships the standard kubernetes-mixin
+        # dashboards, so there is nothing to author. adminPassword is left at
+        # the chart default (admin / prom-operator); access is tailnet-only via
+        # `kubectl port-forward -n monitoring svc/kps-grafana 3001:80`, so no
+        # credential goes in git. Persistence off: dashboards are provisioned,
+        # so a restart re-creates them and we avoid a second PVC.
+        grafana:
+          enabled: true
+          defaultDashboardsEnabled: true
+          persistence:
+            enabled: false
+          # Pinned admin creds from the grafana-admin SealedSecret (provided by
+          # the monitoring-config app, deploy/k8s/monitoring/). Without this the
+          # chart regenerates a random admin password on every redeploy because
+          # persistence is off. Keys: admin-user / admin-password.
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+          resources:
+            requests:
+              cpu: 20m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          # Reached at grafana-k8s.siftroles.com. Traefik routes the Host to
+          # this service; the host cloudflared tunnel maps that hostname to
+          # localhost:80 (Traefik). Cloudflare terminates TLS and enforces
+          # Access (SSO) at the edge, so no TLS block and no public port here.
+          # root_url must be the external URL or Grafana's login redirects and
+          # asset links break behind the proxy.
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - grafana-k8s.siftroles.com
+          grafana.ini:
+            server:
+              root_url: https://grafana-k8s.siftroles.com
+
+        # --- k3s embeds the control plane in one process and does not expose
+        # the upstream component ports, so these only ever produce dead
+        # targets and permanently-firing default alerts. ---
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+        kubeEtcd:
+          enabled: false
+
+        defaultRules:
+          rules:
+            # Rules for the components disabled above. Left on, they alert
+            # forever on metrics that will never exist.
+            alertmanager: false
+            etcd: false
+            kubeControllerManager: false
+            kubeSchedulerAlerting: false
+            kubeSchedulerRecording: false
+            kubeProxy: false
+            # Every node_* rule group: those metrics come from the compose
+            # node-exporter and land in the compose Prometheus, never this
+            # one. Left on, they are permanently no-data here.
+            node: false
+            nodeExporterAlerting: false
+            nodeExporterRecording: false
+            kubePrometheusNodeRecording: false
+            network: false
+            windows: false
+
+        prometheusOperator:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+
+        kube-state-metrics:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+
+        prometheus:
+          prometheusSpec:
+            # Parity with the compose Prometheus.
+            retention: 15d
+            externalLabels:
+              host: thinkpad
+
+            # Watch ServiceMonitors/PrometheusRules in EVERY namespace. The
+            # chart default scopes them to objects carrying its own release
+            # label, which would silently ignore the app's ServiceMonitors
+            # over in jsa-staging.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            scrapeConfigSelectorNilUsesHelmValues: false
+
+            resources:
+              requests:
+                cpu: 50m
+                memory: 400Mi
+              limits:
+                memory: 1Gi
+
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: local-path
+                  accessModes: ['ReadWriteOnce']
+                  resources:
+                    requests:
+                      storage: 10Gi
+
+            # Push staging's business metrics to the compose Prometheus, which
+            # already scrapes prod's. That keeps ONE datasource behind the
+            # app-pipeline dashboard and lets the existing alerts.yml rules
+            # cover staging again. Only jsa_* travels: node_*/container_* would
+            # either duplicate what compose node-exporter already has or arrive
+            # with k8s label shapes the infra dashboard does not query.
+            # Retire this at Phase 8, when prod moves in and Grafana flips to
+            # this Prometheus.
+            remoteWrite:
+              - url: http://compose-prometheus:9090/api/v1/write
+                writeRelabelConfigs:
+                  - sourceLabels: [__name__]
+                    regex: 'jsa_.*'
+                    action: keep
+                  # Keep the series shape identical to prod's scraped series.
+                  - regex: 'prometheus|prometheus_replica'
+                    action: labeldrop
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The Prometheus CRDs are far past the 262144-byte annotation limit that
+      # client-side apply writes into last-applied-configuration.
+      - ServerSideApply=true

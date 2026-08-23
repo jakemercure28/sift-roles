@@ -1,0 +1,30 @@
+# Remote-write target: the compose jsa-observability Prometheus, which lives
+# outside the cluster on this same host. Same selector-less Service +
+# EndpointSlice pattern as supabase-db (ExternalName cannot target a bare IP).
+#
+# The compose side must publish 9090 on the Tailscale IP and run with
+# --web.enable-remote-write-receiver; both are in
+# observability/docker-compose.observability.yml. ufw already allows the pod
+# CIDR (10.42.0.0/16) to the host, so this needs no new firewall surface.
+apiVersion: v1
+kind: Service
+metadata:
+  name: compose-prometheus
+spec:
+  ports:
+    - port: 9090
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: compose-prometheus-1
+  labels:
+    kubernetes.io/service-name: compose-prometheus
+addressType: IPv4
+endpoints:
+  - addresses:
+      - 100.87.101.41
+    conditions:
+      ready: true
+ports:
+  - port: 9090

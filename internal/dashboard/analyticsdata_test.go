@@ -9,6 +9,31 @@ import (
 // fixedAnalyticsNow pins "now" for the analytics golden fixture (2026-06-08T00:00:00Z).
 const fixedAnalyticsNow int64 = 1780876800000
 
+// TestAtsOf covers the analytics ATS detector, including the Gem and
+// SmartRecruiters patterns. SmartRecruiters apply URLs are emitted on the
+// jobs.smartrecruiters.com host by the scraper, so the pattern must match that
+// subdomain (an earlier version only matched the bare/www host and silently
+// bucketed every SR posting as "Other").
+func TestAtsOf(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+	}{
+		{"https://jobs.gem.com/blaze-ai/am9icG9zdA", "Gem"},
+		{"https://jobs.smartrecruiters.com/acme/123", "SmartRecruiters"},
+		{"https://www.smartrecruiters.com/acme/123", "SmartRecruiters"},
+		{"https://smartrecruiters.com/acme/123", "SmartRecruiters"},
+		{"https://jobs.ashbyhq.com/acme/456", "Ashby"},
+		{"https://example.com/careers/789", "Other"},
+		{"", "Other"},
+	}
+	for _, c := range cases {
+		if got := atsOf(c.url); got != c.want {
+			t.Errorf("atsOf(%q) = %q, want %q", c.url, got, c.want)
+		}
+	}
+}
+
 // TestComputeAnalyticsMetricsParity seeds the shared analytics fixtures and asserts
 // the Go metrics JSON matches the Node golden byte-for-byte.
 func TestComputeAnalyticsMetricsParity(t *testing.T) {

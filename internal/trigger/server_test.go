@@ -22,19 +22,53 @@ type fakeRunner struct {
 	calls   atomic.Int32
 	traceID atomic.Value
 	userID  atomic.Value
+	timeout atomic.Value
 }
 
-func (f *fakeRunner) TryStart(ctx context.Context, _ time.Duration, userID string) bool {
+func (f *fakeRunner) TryStart(ctx context.Context, timeout time.Duration, userID string) bool {
 	f.calls.Add(1)
 	f.traceID.Store(middleware.TraceID(ctx))
 	f.userID.Store(userID)
+	f.timeout.Store(timeout)
 	return f.running.CompareAndSwap(false, true)
 }
 
 func (f *fakeRunner) release() { f.running.Store(false) }
 
+const (
+	testTenantTimeout    = time.Minute
+	testFullCycleTimeout = time.Hour
+)
+
 func newServer(r Runner) *Server {
-	return New(r, time.Minute, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(r, testTenantTimeout, testFullCycleTimeout, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// A per-tenant scrape gets the tenant budget; an empty-user scrape runs a full
+// cycle (global board union / all-tenant fan-out) and gets the larger budget.
+func TestScrapeTimeoutByScope(t *testing.T) {
+	f := &fakeRunner{}
+	srv := httptest.NewServer(newServer(f).Handler())
+	defer srv.Close()
+
+	res, err := http.Post(srv.URL+"/scrape", "application/json", bytes.NewBufferString(`{"userId":"user-123"}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	res.Body.Close()
+	if got, _ := f.timeout.Load().(time.Duration); got != testTenantTimeout {
+		t.Fatalf("tenant scrape timeout = %v, want %v", got, testTenantTimeout)
+	}
+
+	f.release()
+	res, err = http.Post(srv.URL+"/scrape", "application/json", bytes.NewBufferString(`{}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	res.Body.Close()
+	if got, _ := f.timeout.Load().(time.Duration); got != testFullCycleTimeout {
+		t.Fatalf("full-cycle scrape timeout = %v, want %v", got, testFullCycleTimeout)
+	}
 }
 
 func TestScrapePassesTenantIDToRunner(t *testing.T) {

@@ -1,0 +1,37 @@
+# Non-secret env shared by both environments. Port of the `environment:`
+# block in docker-compose.yml (see that file for the reasoning behind each
+# knob). Env-specific values live in the overlay configmap-patch.yaml;
+# secrets live in the per-overlay SealedSecret (jsa-secrets).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jsa-config
+data:
+  # Container paths (PVC subPaths mount at these locations).
+  DATA_DIR: /app/data
+  CONTEXT_DIR: /app/.context
+  PUBLIC_DIR: /app/public
+  LOG_DIR: /app/logs
+  JD_HEALTH_PATH: /app/data/jd-health.json
+  SLUG_HEALTH_PATH: /app/data/slug-health.json
+
+  # Listeners. The dashboard Service exposes 3131 and the metrics listener
+  # 9090; the scrape trigger on 8090 stays pod-internal (no Service port).
+  DASHBOARD_ADDR: ':3131'
+  METRICS_ADDR: ':9090'
+  TRIGGER_ADDR: ':8090'
+  SCRAPE_TRIGGER_URL: http://localhost:8090
+
+  # In-cluster DNS replaces the compose network alias unchanged.
+  SCRAPER_URL: http://scraper-service:4040
+
+  DATABASE_TYPE: postgres
+
+  # Pipeline defaults (staging overrides the noisy ones in its overlay).
+  SCRAPE_SCHEDULE: '0 */3 * * *'
+  SCRAPE_ON_START: '1'
+  SCORING_ENABLED: '1'
+  SCORE_ON_START: '0'
+  GEMINI_HOST_PER_TENANT_DAILY_LIMIT: '150'
+  GLOBAL_JOB_SEED_LIMIT: '100'
+  ONBOARD_BURST_LIMIT: '25'

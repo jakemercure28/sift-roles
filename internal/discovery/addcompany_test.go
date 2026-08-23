@@ -15,6 +15,11 @@ func TestSlugFromATSURL(t *testing.T) {
 		{"https://api.lever.co/v0/postings/farfetch?mode=json", "lever", "farfetch", false},
 		{"https://jobs.ashbyhq.com/notion", "ashby", "notion", false},
 		{"https://notion.ashbyhq.com", "ashby", "notion", false},
+		{"https://jobs.gem.com/nominal", "gem", "nominal", false},
+		{"https://jobs.gem.com/nominal/cba503aa-f40f-4608-b647-3f4eeb1e5db9", "gem", "nominal", false},
+		{"https://jobs.smartrecruiters.com/Freshworks", "smartrecruiters", "Freshworks", false},
+		{"https://jobs.smartrecruiters.com/Freshworks/744000136352867-lead-audit", "smartrecruiters", "Freshworks", false},
+		{"https://careers.smartrecruiters.com/Visa", "smartrecruiters", "Visa", false},
 		// Workday is handled separately; not an API board.
 		{"https://jcrew.wd1.myworkdayjobs.com/jcrew", "", "", true},
 		{"not a url at all", "", "", true},
@@ -52,6 +57,27 @@ func TestAddAPIBoardDedup(t *testing.T) {
 	}
 	if apiList(&s, "workday") != nil {
 		t.Errorf("apiList(workday) should be nil (not an API platform)")
+	}
+	// Gem is a slug-based API platform, deduped like the rest.
+	if added, already := addAPIBoard(&s, "gem", "Nominal"); !added || already {
+		t.Fatalf("gem add: added=%v already=%v, want true/false", added, already)
+	}
+	if added, already := addAPIBoard(&s, "gem", "nominal"); added || !already {
+		t.Fatalf("gem dup add: added=%v already=%v, want false/true", added, already)
+	}
+	if len(s.Gem) != 1 {
+		t.Fatalf("gem list = %v, want one entry", s.Gem)
+	}
+	// SmartRecruiters is a slug-based API platform, deduped like the rest. Its
+	// identifiers are case-sensitive, but dedup keys off the case-folded slug.
+	if added, already := addAPIBoard(&s, "smartrecruiters", "Freshworks"); !added || already {
+		t.Fatalf("smartrecruiters add: added=%v already=%v, want true/false", added, already)
+	}
+	if added, already := addAPIBoard(&s, "smartrecruiters", "freshworks"); added || !already {
+		t.Fatalf("smartrecruiters dup add: added=%v already=%v, want false/true", added, already)
+	}
+	if len(s.SmartRecruiters) != 1 {
+		t.Fatalf("smartrecruiters list = %v, want one entry", s.SmartRecruiters)
 	}
 }
 

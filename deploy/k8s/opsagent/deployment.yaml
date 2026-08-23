@@ -1,0 +1,168 @@
+# Self-healing infra agent. Receives Alertmanager webhooks, investigates with
+# read-only cluster/Prometheus/Argo/GitHub tools, and applies a small allowlisted
+# set of remediations. See docs/opsagent.md.
+#
+# It shares the go-backend image (it is the `server opsagent` subcommand) rather
+# than shipping a second one, which also sidesteps the deploy-ordering trap: no
+# new registry artifact has to exist before these manifests can sync. It does
+# NOT open the database or talk to the scraper.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsagent
+  namespace: monitoring
+  labels:
+    app: opsagent
+spec:
+  # One replica, Recreate. Two copies would investigate the same alert twice,
+  # race on the same remediation, and double the token spend for one problem.
+  # The in-process run lock only serializes within a process.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: opsagent
+  template:
+    metadata:
+      labels:
+        app: opsagent
+    spec:
+      serviceAccountName: opsagent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: opsagent
+          image: localhost:5000/jsa/go-backend:latest
+          args: ['opsagent']
+          ports:
+            - name: http
+              containerPort: 8091
+          env:
+            # --- what it is allowed to do ---
+            # Dry run is ON here and stays on until several transcripts have
+            # been read and judged correct. Flipping this to "0" is what arms
+            # the agent; OPSAGENT_ENABLED_ACTIONS then selects which actions.
+            # Both must be set for anything to reach the cluster.
+            - name: OPSAGENT_DRY_RUN
+              value: '1'
+            # Comma-separated, from: rollout_restart, delete_pod,
+            # scale_deployment, argocd_sync. Empty means every action is
+            # reported as a dry run. Add them one at a time.
+            - name: OPSAGENT_ENABLED_ACTIONS
+              value: ''
+            - name: OPSAGENT_WRITABLE_NAMESPACES
+              value: 'jsa-prod,jsa-staging'
+            - name: OPSAGENT_MAX_REPLICAS
+              value: '3'
+            # argocd_sync is bounded by Application name, not by namespace: every
+            # Application object lives in argocd no matter what it deploys, and
+            # the sync goes through the Argo API with a token rather than through
+            # this ServiceAccount, so RBAC does not bound it either.
+            #
+            # Must never include "opsagent" (arming lives in this Deployment's
+            # env, so self-sync is self-arming) or "root" (the app-of-apps
+            # reaches everything). The agent refuses to start if either appears.
+            - name: OPSAGENT_SYNCABLE_APPS
+              value: 'jsa-prod,jsa-staging'
+
+            # --- model ---
+            # Gemini free tier, so this costs nothing to run. Quotas are
+            # PER MODEL, so neither of these competes with the scorer's
+            # gemini-3.1-flash-lite budget.
+            #
+            # One investigation costs exactly one request (evidence is gathered
+            # deterministically, not through a tool loop), so 3.6-flash's 20
+            # requests/day is ample for a daily sweep plus alert traffic.
+            - name: OPSAGENT_MODEL
+              value: 'gemini-3.6-flash'
+            # Tried once on a 429. 3.5-flash-lite has 500 requests/day against
+            # 3.6-flash's 20, so it covers the case where the good model's
+            # daily allowance is gone.
+            - name: OPSAGENT_FALLBACK_MODEL
+              value: 'gemini-3.5-flash-lite'
+            # Local ceiling, enforced before the request goes out, so hitting
+            # the limit is a logged decision rather than a 429 at 3am. Evidence
+            # is still collected and escalated once it is spent.
+            - name: OPSAGENT_DAILY_CALL_BUDGET
+              value: '15'
+
+            # --- what it can see ---
+            - name: OPSAGENT_PROM_IN_CLUSTER
+              value: 'http://kps-prometheus.monitoring.svc:9090'
+            # Selector-less Service pointing at the compose Prometheus on the
+            # host; see deploy/k8s/monitoring/compose-prometheus.yaml.
+            - name: OPSAGENT_PROM_COMPOSE
+              value: 'http://compose-prometheus.monitoring.svc:9090'
+            - name: OPSAGENT_ARGOCD_SERVER
+              value: 'http://argocd-server.argocd.svc'
+            - name: OPSAGENT_GITHUB_REPO
+              value: 'jakemercure28/job-search-automation-private'
+            # Daily. A clean sweep makes no model call at all, but a daily
+            # cadence keeps even the worst case well inside the free tier.
+            - name: OPSAGENT_SWEEP_SCHEDULE
+              value: '17 7 * * *'
+            - name: LOG_LEVEL
+              value: 'info'
+
+            # --- credentials ---
+            # Each is optional in the sense that the agent degrades rather than
+            # crashes: no Argo token disables the Argo tools, no GitHub token
+            # disables escalation (which would leave findings only in the pod
+            # logs, so it should be set).
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opsagent-secrets
+                  key: gemini-api-key
+            - name: OPSAGENT_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: opsagent-secrets
+                  key: github-token
+                  optional: true
+            - name: OPSAGENT_ARGOCD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: opsagent-secrets
+                  key: argocd-token
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          # /healthz is served by the agent's own mux and does no outbound work,
+          # so a Claude API blip or a slow investigation never restarts the pod.
+          # That matters more here than elsewhere: restarting mid-investigation
+          # would lose the run and re-fire it from scratch.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            # Almost all of the time it is idle waiting on a webhook; the work
+            # is network-bound on the Claude API, not local compute.
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

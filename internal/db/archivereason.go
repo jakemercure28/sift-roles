@@ -13,6 +13,16 @@ const (
 	ArchiveReasonCanonicalized  = "canonicalized_alternate"
 	ArchiveReasonUnsupported    = "canonicalize_unsupported"
 	ArchiveReasonLowScore       = "low_score"
+	// Prefilter reasons: the pre-score location gate buried the row before any
+	// Gemini call. prefilter_non_us is a remote role not open to US candidates;
+	// prefilter_location is every other miss against the tenant's saved prefs
+	// (not remote under remote-only, excluded unknown location, metro miss).
+	ArchiveReasonPrefilterNonUS    = "prefilter_non_us"
+	ArchiveReasonPrefilterLocation = "prefilter_location"
+	// The listing aged past the stale window before scoring quota ever reached
+	// it; a 30+ day old posting is usually filled or ghost, so the Gemini call
+	// is better spent on fresh listings.
+	ArchiveReasonStaleUnscored = "stale_unscored"
 )
 
 // CountCascadedArchives reports how many (title, company) groups for the tenant

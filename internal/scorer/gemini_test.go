@@ -3,6 +3,7 @@ package scorer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -299,6 +300,214 @@ func TestCallGeminiRetriesOn429ThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestCallGeminiFailsOverToOverflowKeyOn429(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		keys []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("x-goog-api-key")
+		mu.Lock()
+		keys = append(keys, key)
+		mu.Unlock()
+		if key == "free-key-failover" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"quota exceeded"}}`))
+			return
+		}
+		writeCandidate(w, "SCORE: 7\nREASONING: overflow")
+	}))
+	defer srv.Close()
+
+	usage := &fakeUsage{}
+	c := newTestClient(srv.URL, "free-key-failover", usage).WithOverflowKey("paid-key-failover", 0)
+	// retry429 is left at its 30s default on purpose: failover must switch keys
+	// immediately, not sleep out the 429 backoff. The deadline catches a regression.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	text, err := c.CallGemini(ctx, "prompt", 600)
+	if err != nil {
+		t.Fatalf("CallGemini: %v", err)
+	}
+	if !strings.Contains(text, "overflow") {
+		t.Fatalf("unexpected text: %q", text)
+	}
+
+	// The cooldown must route the next call straight to the overflow key without
+	// probing the exhausted primary again.
+	if _, err := c.CallGemini(ctx, "prompt", 600); err != nil {
+		t.Fatalf("second CallGemini: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"free-key-failover", "paid-key-failover", "paid-key-failover"}
+	if len(keys) != len(want) {
+		t.Fatalf("server saw keys %v, want %v", keys, want)
+	}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("server saw keys %v, want %v", keys, want)
+		}
+	}
+	if usage.calls.Load() != 2 {
+		t.Fatalf("usage recorded %d, want 2 (both successes)", usage.calls.Load())
+	}
+}
+
+func TestPreferOverflowUsesOverflowKeyImmediately(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		keys []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		keys = append(keys, r.Header.Get("x-goog-api-key"))
+		mu.Unlock()
+		writeCandidate(w, "SCORE: 8\nREASONING: preferred")
+	}))
+	defer srv.Close()
+
+	usage := &fakeUsage{}
+	c := newTestClient(srv.URL, "free-key-prefer", usage).
+		WithOverflowKey("paid-key-prefer", 0).
+		WithPreferOverflow(true)
+
+	if _, err := c.CallGeminiScore(context.Background(), "prompt", 600); err != nil {
+		t.Fatalf("CallGeminiScore: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// No 429 ever happened; prefer-overflow must still route to the paid key.
+	if len(keys) != 1 || keys[0] != "paid-key-prefer" {
+		t.Fatalf("server saw keys %v, want [paid-key-prefer]", keys)
+	}
+	if usage.calls.Load() != 1 {
+		t.Fatalf("usage recorded %d, want 1", usage.calls.Load())
+	}
+}
+
+func TestPreferOverflowWithoutKeyFallsBackToPrimary(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("x-goog-api-key"); got != "free-key-prefer-solo" {
+			t.Errorf("api key header = %q, want the primary key", got)
+		}
+		writeCandidate(w, "SCORE: 5\nREASONING: primary")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "free-key-prefer-solo", &fakeUsage{}).WithPreferOverflow(true)
+	if _, err := c.CallGemini(context.Background(), "prompt", 600); err != nil {
+		t.Fatalf("CallGemini: %v", err)
+	}
+}
+
+func TestCallGemini429WithoutOverflowKeyStillRetriesPrimary(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("x-goog-api-key"); got != "free-key-solo" {
+			t.Errorf("api key header = %q, want the primary key", got)
+		}
+		if hits.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+			return
+		}
+		writeCandidate(w, "SCORE: 6\nREASONING: recovered")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "free-key-solo", &fakeUsage{})
+	c.retry429 = 1 * time.Millisecond
+
+	if _, err := c.CallGemini(context.Background(), "prompt", 600); err != nil {
+		t.Fatalf("CallGemini: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("server hit %d times, want 2", hits.Load())
+	}
+}
+
+// The real token-rate 429 body: a per-minute input-token limit with a RetryInfo
+// RetryDelay. We must honor that delay (not the fixed retry429) and then succeed.
+func TestCallGeminiHonorsRetryDelayOnTokenRate429(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"You exceeded your current quota. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"20ms"}]}}`))
+			return
+		}
+		writeCandidate(w, "SCORE: 6\nREASONING: recovered")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "free-key-tpm", &fakeUsage{})
+	// Leave retry429 at its 30s default: the test only passes quickly if the code
+	// honors the 20ms RetryDelay instead of falling back to the fixed delay.
+	start := time.Now()
+	text, err := c.CallGemini(context.Background(), "prompt", 600)
+	if err != nil {
+		t.Fatalf("CallGemini: %v", err)
+	}
+	if !strings.Contains(text, "recovered") {
+		t.Fatalf("unexpected text: %q", text)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("server hit %d times, want 2 (one token-rate 429 + one success)", hits.Load())
+	}
+	// Honored 20ms + up to 3s jitter; the fixed 30s fallback would blow this.
+	if waited := time.Since(start); waited > 10*time.Second {
+		t.Fatalf("waited %s; RetryDelay was not honored (fell back to fixed delay)", waited)
+	}
+}
+
+// The daily request cap won't clear within any backoff, so a free_tier_requests
+// 429 must abandon retries immediately rather than burn the ladder.
+func TestCallGeminiAbandonsOnDailyRequestQuota(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"You exceeded your current quota. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 500","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"41s"}]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "free-key-daily", &fakeUsage{})
+	c.retry429 = 1 * time.Millisecond
+	if _, err := c.CallGemini(context.Background(), "prompt", 600); err == nil {
+		t.Fatal("expected error on daily request quota")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("server hit %d times, want 1 (no retry on the daily request cap)", hits.Load())
+	}
+}
+
+// A RetryDelay longer than maxRateRetryWait is too deep to hold a worker for, so
+// the call is abandoned after the first 429 instead of sleeping minutes.
+func TestCallGeminiAbandonsWhenRetryDelayExceedsCap(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited on tokens","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"600s"}]}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "free-key-deep", &fakeUsage{})
+	start := time.Now()
+	if _, err := c.CallGemini(context.Background(), "prompt", 600); err == nil {
+		t.Fatal("expected error when the retry delay exceeds the cap")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("server hit %d times, want 1 (abandon, don't wait 600s)", hits.Load())
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Fatalf("waited %s; should have abandoned without honoring the 600s delay", waited)
+	}
+}
+
 func TestCallGeminiNoAPIKey(t *testing.T) {
 	c := newTestClient("http://unused", "", &fakeUsage{})
 	if _, err := c.CallGemini(context.Background(), "p", 600); err == nil {
@@ -376,4 +585,65 @@ func ptrStr(p *int) string {
 		return "nil"
 	}
 	return strconv.Itoa(*p)
+}
+
+func TestScoreCallsSendThinkingLevel(t *testing.T) {
+	var gotSingle, gotBatch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			GenerationConfig struct {
+				ThinkingConfig *struct {
+					ThinkingLevel string `json:"thinkingLevel"`
+				} `json:"thinkingConfig"`
+				ResponseMimeType string `json:"responseMimeType"`
+			} `json:"generationConfig"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Errorf("bad request body: %v", err)
+		}
+		level := ""
+		if req.GenerationConfig.ThinkingConfig != nil {
+			level = req.GenerationConfig.ThinkingConfig.ThinkingLevel
+		}
+		if req.GenerationConfig.ResponseMimeType == "application/json" {
+			gotBatch = level
+		} else {
+			gotSingle = level
+		}
+		writeCandidate(w, "SCORE: 5\nREASONING: ok")
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "think-key", &fakeUsage{}).WithThinkingLevel("low")
+	if _, err := c.CallGeminiScore(context.Background(), "p", 0); err != nil {
+		t.Fatalf("score: %v", err)
+	}
+	if _, err := c.CallGeminiJSON(context.Background(), "p", 0, batchSchema); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if gotSingle != "low" || gotBatch != "low" {
+		t.Fatalf("thinkingLevel single=%q batch=%q, want low/low", gotSingle, gotBatch)
+	}
+
+	// Unset level omits the field entirely (model default).
+	gotSingle = "unset"
+	c2 := newTestClient(srv.URL, "think-key-2", &fakeUsage{})
+	if _, err := c2.CallGeminiScore(context.Background(), "p", 0); err != nil {
+		t.Fatalf("score without level: %v", err)
+	}
+	if gotSingle != "" {
+		t.Fatalf("thinkingLevel without WithThinkingLevel = %q, want omitted", gotSingle)
+	}
+}
+
+func TestUsageMetadataParsesThoughtTokens(t *testing.T) {
+	var usage geminiUsageMetadata
+	raw := `{"promptTokenCount": 2900, "candidatesTokenCount": 120, "thoughtsTokenCount": 1100, "totalTokenCount": 4120}`
+	if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if usage.ThoughtsTokenCount != 1100 {
+		t.Fatalf("thoughts = %d, want 1100", usage.ThoughtsTokenCount)
+	}
 }

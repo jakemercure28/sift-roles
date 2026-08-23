@@ -41,9 +41,10 @@ type atsSlug struct {
 	Slug     string
 }
 
-// slugFromATSURL pulls {platform, slug} out of a Greenhouse/Ashby/Lever board
-// URL. Returns nil for anything else (including Workday, handled separately via
-// ParseWorkdayURL). Ported from slugFromAtsUrl in add-company.js.
+// slugFromATSURL pulls {platform, slug} out of a
+// Greenhouse/Ashby/Lever/Gem/SmartRecruiters board URL. Returns nil for anything
+// else (including Workday, handled separately via ParseWorkdayURL). Ported from
+// slugFromAtsUrl in add-company.js.
 func slugFromATSURL(raw string) *atsSlug {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -61,6 +62,12 @@ func slugFromATSURL(raw string) *atsSlug {
 	}
 
 	switch {
+	// jobs.gem.com/<slug>, jobs.gem.com/<slug>/<jobExtId>
+	case host == "jobs.gem.com" && first != "":
+		return &atsSlug{Platform: "gem", Slug: first}
+	// jobs.smartrecruiters.com/<slug>/..., careers.smartrecruiters.com/<slug>/...
+	case (host == "jobs.smartrecruiters.com" || host == "careers.smartrecruiters.com") && first != "":
+		return &atsSlug{Platform: "smartrecruiters", Slug: first}
 	// boards.greenhouse.io/<slug>, job-boards.greenhouse.io/<slug>
 	case strings.HasSuffix(host, "greenhouse.io") && first != "" &&
 		(host == "boards.greenhouse.io" || host == "job-boards.greenhouse.io"):
@@ -107,6 +114,10 @@ func apiList(s *Suggested, platform string) *[]string {
 		return &s.Ashby
 	case "lever":
 		return &s.Lever
+	case "gem":
+		return &s.Gem
+	case "smartrecruiters":
+		return &s.SmartRecruiters
 	}
 	return nil
 }
@@ -206,7 +217,7 @@ func AddCompany(ctx context.Context, dataDir string, client *http.Client, args A
 		return AddCompanyResult{}, err
 	}
 	if !resolved.Exists {
-		return AddCompanyResult{Code: 1, Reason: `No Greenhouse/Ashby/Lever board found for "` + rawSlug + `". If this company is on Workday, pass its --url (https://<tenant>.wdN.myworkdayjobs.com/<Board>).`}, nil
+		return AddCompanyResult{Code: 1, Reason: `No Greenhouse/Ashby/Lever/Gem/SmartRecruiters board found for "` + rawSlug + `". If this company is on Workday, pass its --url (https://<tenant>.wdN.myworkdayjobs.com/<Board>).`}, nil
 	}
 	added, already := addAPIBoard(&suggested, resolved.Platform, resolved.Slug)
 	if err := persist(dataDir, &suggested, added); err != nil {

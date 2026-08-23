@@ -14,7 +14,7 @@ type your Mac password once. That is it.
 2. **Paste in this one line and press Return.**
 
    ```
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/job-search-automation/main/install.sh)"
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/jakemercure28/sift-roles/main/install.sh)"
    ```
 
    To paste: click once in the Terminal window, then hold **Command** and press

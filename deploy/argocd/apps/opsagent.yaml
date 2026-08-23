@@ -1,0 +1,38 @@
+# Self-healing infra agent: Alertmanager's webhook receiver, and the only thing
+# in this cluster that acts on an alert rather than just recording it.
+# See docs/opsagent.md for what it is allowed to do and how to arm it.
+#
+# MANUAL sync, unlike the other in-cluster apps, for two reasons:
+#
+#   1. Deploy ordering. CI pushes code and the image-tag bump as two separate
+#      commits, so an auto-syncing app can apply manifests that reference an
+#      image tag not yet in the registry and land in a 404 crashloop. The agent
+#      runs the `opsagent` subcommand of the go-backend binary, so it needs an
+#      image that already carries that subcommand.
+#
+#   2. Arming is a judgement call. The env block in the Deployment controls
+#      whether the agent can write to the cluster at all. A human should be the
+#      one deciding that a sync which changes those values goes in, having read
+#      the dry-run transcripts first.
+#
+# Sync with: argocd app sync opsagent   (or from the Argo UI)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opsagent
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:jakemercure28/job-search-automation-private.git
+    targetRevision: dev
+    path: deploy/k8s/opsagent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    # No `automated:` block on purpose. selfHeal would also fight a deliberate
+    # `kubectl scale deploy/opsagent --replicas=0`, which is the fastest way to
+    # stop the agent during an incident.
+    syncOptions:
+      - CreateNamespace=true

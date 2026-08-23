@@ -47,6 +47,8 @@ var atsPatterns = []atsPattern{
 	{"Workable", regexp.MustCompile(`^https?://apply\.workable\.com/([^/?#]+)`)},
 	{"Workday", regexp.MustCompile(`^https?://([^/.]+)\.(?:wd\d+\.|)myworkdayjobs\.com/`)},
 	{"Rippling", regexp.MustCompile(`^https?://ats\.rippling\.com/([^/?#]+)/`)},
+	{"Gem", regexp.MustCompile(`^https?://jobs\.gem\.com/([^/?#]+)`)},
+	{"SmartRecruiters", regexp.MustCompile(`^https?://(?:[a-z0-9-]+\.)?smartrecruiters\.com/([^/?#]+)`)},
 }
 
 var ghJidRe = regexp.MustCompile(`[?&]gh_jid=\d+`)

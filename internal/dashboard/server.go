@@ -41,8 +41,18 @@ type Server struct {
 	repo             *db.Repository
 	rejection        RejectionScorer
 	rejectionSyncRun func(context.Context) (rejectionsync.Summary, error)
-	rateDelay        time.Duration
-	dailyLimit       int
+	// scoringKick + scoringKickWindowDays: see SetScoringKick. Fired when a
+	// tenant returns after windowDays of inactivity so the activity-gated
+	// scoring pass runs for them immediately.
+	scoringKick           func(userID string)
+	scoringKickWindowDays int
+	rateDelay             time.Duration
+	dailyLimit            int
+	// marketAllTimeWindowDays bounds the Market Research all-time job scan to the
+	// last N days so the read does not grow unbounded with the table. 0 (the
+	// default for bare/test Servers) keeps the full all-time scope; production sets
+	// it from MARKET_ALLTIME_WINDOW_DAYS via SetMarketAllTimeWindowDays.
+	marketAllTimeWindowDays int
 	// scrapeSchedule is the cron expression for background scrape runs, surfaced
 	// on /api/scoring-progress as the next-scrape time so the browser can show
 	// when fresh jobs will arrive. Empty means "unknown" (field is then omitted).
@@ -172,6 +182,10 @@ func (s *Server) SetAuth(v middleware.Verifier, url, anonKey string) {
 // Leaving it unset disables the auth-row delete (data is still wiped, but the login
 // survives), so set it whenever hosted auth is enabled.
 func (s *Server) SetAuthAdminDSN(dsn string) { s.authAdminDSN = dsn }
+
+// SetMarketAllTimeWindowDays bounds the Market Research all-time scan to the last
+// days. days <= 0 leaves the full all-time scope (and existing behavior) unchanged.
+func (s *Server) SetMarketAllTimeWindowDays(days int) { s.marketAllTimeWindowDays = days }
 
 // SetRateLimit enables per-tenant throttling of the expensive authenticated
 // endpoints (market research, ask, scrape-now, profile refresh/extract). perMinute
@@ -374,6 +388,11 @@ func isPublicPath(r *http.Request) bool {
 // supabase-js. authEnabled is false on self-host (no url/key), so the frontend
 // skips loading the SDK and shows no login UI.
 func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
+	// Never cache. This carries the Supabase URL + anon key the browser uses to
+	// initialize supabase-js. If a browser (or installed PWA) serves a stale copy
+	// after the auth backend is moved (e.g. a hosted -> self-hosted cutover), it
+	// points users at the old project and login fails with redirect_uri_mismatch.
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authEnabled": s.authVerifier != nil,
 		"url":         s.supabaseURL,

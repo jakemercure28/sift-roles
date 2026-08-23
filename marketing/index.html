@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sift — Your job search, sifted.</title>
+  <meta name="description" content="Sift reads your resume, scans every fresh opening across the web, and scores each one against you. You review a short list. You decide who to apply to." />
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Sift — Your job search, sifted." />
+  <meta property="og:description" content="Stop scrolling job boards. Sift reads your resume and surfaces only the roles worth your time." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://siftroles.com" />
+  <meta property="og:image" content="https://siftroles.com/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Sift — Your job search, sifted." />
+  <meta property="og:site_name" content="Sift" />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Sift — Your job search, sifted." />
+  <meta name="twitter:description" content="Stop scrolling job boards. Sift reads your resume and surfaces only the roles worth your time." />
+  <meta name="twitter:image" content="https://siftroles.com/og.png" />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%20shape-rendering%3D%22crispEdges%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2212%22%20fill%3D%22%23f4f4f5%22%2F%3E%3Cpath%20d%3D%22M7%209h50v10H7zM13%2021h38v8h-6v7h-7v16H26V36h-7v-7h-6z%22%20fill%3D%22%2318181b%22%2F%3E%3Cpath%20d%3D%22M17%2013h7v3h-7zM29%2013h7v3h-7zM41%2013h7v3h-7zM24%2025h16v4H24z%22%20fill%3D%22%23f4f4f5%22%2F%3E%3C%2Fsvg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=6" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <!-- ============ NAV ============ -->
+  <header class="nav" id="top">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="Sift home">
+        <svg class="brand-mark" width="30" height="30" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" shape-rendering="crispEdges">
+          <path d="M7 9h50v10H7zM13 21h38v8h-6v7h-7v16H26V36h-7v-7h-6z" fill="currentColor" />
+          <path d="M17 13h7v3h-7zM29 13h7v3h-7zM41 13h7v3h-7zM24 25h16v4H24z" fill="var(--brand-cutout)" />
+        </svg>
+        <span class="brand-word">sift</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#how">How it works</a>
+        <a href="#wont">What Sift won't do</a>
+        <a class="btn" href="https://github.com/jakemercure28/sift-roles">Get it on GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============ STATUS STRIP ============ -->
+    <section class="strip">
+      <div class="wrap strip-inner">
+        <span class="strip-label">Sift is now open source</span>
+        <span class="strip-list">The hosted service is retired. Self-host it free from <a href="https://github.com/jakemercure28/sift-roles">GitHub</a>, and your job search runs entirely on your own machine.</span>
+      </div>
+    </section>
+
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="wrap hero-inner">
+        <p class="eyebrow">For people who are done scrolling job boards</p>
+        <h1 class="hero-title">Your job search,<br /><span class="mark">sifted.</span></h1>
+        <p class="hero-sub">
+          Sift reads your resume, scans every fresh opening across the web, and scores each role against
+          you. You get a short, ranked list of jobs worth your time. You decide who to apply to.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-lg" href="https://github.com/jakemercure28/sift-roles">Get it on GitHub</a>
+          <a class="btn-text" href="#how">See how it works &rsaquo;</a>
+        </div>
+        <p class="hero-fine">Free, open source, self-hosted. No auto-apply. No spam. Your data never leaves your machine.</p>
+
+        <!-- product frame: live HTML mockup of the ranked list -->
+        <div class="shot shot-hero" role="img" aria-label="The Sift dashboard showing a ranked list of scored roles">
+          <div class="shot-bar"><span></span><span></span><span></span><em>localhost:3131</em></div>
+          <div class="shot-body">
+            <div class="mk mk-list">
+              <div class="mk-top">
+                <div class="mk-brand">
+                  <svg width="18" height="18" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" shape-rendering="crispEdges">
+                    <path d="M7 9h50v10H7zM13 21h38v8h-6v7h-7v16H26V36h-7v-7h-6z" fill="currentColor" />
+                    <path d="M17 13h7v3h-7zM29 13h7v3h-7zM41 13h7v3h-7zM24 25h16v4H24z" fill="var(--brand-cutout)" />
+                  </svg>
+                  <span>New matches</span>
+                </div>
+                <div class="mk-chips"><span class="mk-chip on">Pending 6</span><span class="mk-chip">Approved</span><span class="mk-chip">Archived</span></div>
+              </div>
+              <div class="mk-rows">
+                <div class="mk-row"><span class="sc sc10">10</span><div class="mk-role"><strong>Staff Platform Engineer</strong><em>Vercel · Remote (US)</em></div><span class="ats ats-gh">Greenhouse</span><span class="fresh"></span></div>
+                <div class="mk-row"><span class="sc sc9">9</span><div class="mk-role"><strong>Senior Site Reliability Engineer</strong><em>Ramp · New York, NY</em></div><span class="ats ats-ash">Ashby</span><span class="fresh"></span></div>
+                <div class="mk-row"><span class="sc sc9">9</span><div class="mk-role"><strong>Infrastructure Engineer</strong><em>Linear · Remote</em></div><span class="ats ats-ash">Ashby</span><span class="fresh"></span></div>
+                <div class="mk-row"><span class="sc sc8">8</span><div class="mk-role"><strong>DevOps Engineer</strong><em>Retool · San Francisco, CA</em></div><span class="ats ats-lev">Lever</span><span class="fresh"></span></div>
+                <div class="mk-row"><span class="sc sc8">8</span><div class="mk-role"><strong>Cloud Engineer</strong><em>Notion · Remote</em></div><span class="ats ats-gh">Greenhouse</span><span class="fresh"></span></div>
+                <div class="mk-row dim"><span class="sc sc7">7</span><div class="mk-role"><strong>Platform Engineer</strong><em>Brex · Remote</em></div><span class="ats ats-wd">Workday</span><span class="fresh stale"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ TRUST STRIP ============ -->
+    <section class="strip">
+      <div class="wrap strip-inner">
+        <span class="strip-label">Reads every board that matters</span>
+        <span class="strip-list">Greenhouse &nbsp;·&nbsp; Ashby &nbsp;·&nbsp; Lever &nbsp;·&nbsp; Workday &nbsp;·&nbsp; Built In</span>
+      </div>
+    </section>
+
+    <!-- ============ MANIFESTO ============ -->
+    <section class="manifesto">
+      <div class="wrap">
+        <p>
+          Job boards are built to keep you scrolling. Thousands of listings, most of them wrong for you,
+          half of them already filled. <strong>Sift is the opposite.</strong> It reads before it shows you
+          anything, and it hides the noise so you can see the signal.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ VALUE TRIO ============ -->
+    <section class="trio">
+      <div class="wrap trio-grid">
+        <article class="card">
+          <div class="card-num">01</div>
+          <h3>Driven by your resume</h3>
+          <p>No keywords to configure, no seed companies to pick. Sift learns what you do from your resume and searches the whole market on your behalf.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">02</div>
+          <h3>Scored against you</h3>
+          <p>Every listing is read by an LLM and scored on real fit: skills, seniority, comp, and red flags. The confident rejects get buried automatically.</p>
+        </article>
+        <article class="card">
+          <div class="card-num">03</div>
+          <h3>No ghost jobs</h3>
+          <p>Sift checks whether a posting is still open and flags stale listings, so you never burn an afternoon applying to a role that closed weeks ago.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section class="how" id="how">
+      <div class="wrap">
+        <h2 class="section-title">From resume to offer, in one place</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-k">1</span>
+            <div>
+              <h3>Drop in your resume</h3>
+              <p>That is the whole setup. Sift builds a profile of who you are and what you want out of it.</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-k">2</span>
+            <div>
+              <h3>Sift scans and scores, every day</h3>
+              <p>Fresh openings across every major board get pulled in overnight and ranked against you while you sleep.</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-k">3</span>
+            <div>
+              <h3>You review a short list</h3>
+              <p>Open the dashboard to a ranked shortlist, not a firehose. Approve the ones worth pursuing, reject the rest in a click.</p>
+            </div>
+          </li>
+          <li>
+            <span class="step-k">4</span>
+            <div>
+              <h3>Track it through to offer</h3>
+              <p>Applied, phone screen, interview, onsite, offer. Move each role along and see your whole pipeline at a glance.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ MARKET SPOTLIGHT ============ -->
+    <section class="spot" id="market">
+      <div class="wrap">
+        <p class="eyebrow center">Market intelligence</p>
+        <h2 class="section-title">Read the market for your role<br />before you spend a single application</h2>
+        <p class="spot-sub">
+          Sift reads every live posting for your target role and tells you what the market actually looks
+          like right now. How many roles are open, how many you can realistically land at your experience
+          level, how many are remote, and whether hiring is heating up or cooling off.
+        </p>
+
+        <div class="shot shot-wide" role="img" aria-label="Sift's market research view for a role, showing role counts, seniority mix, and posting trend">
+          <div class="shot-bar"><span></span><span></span><span></span><em>localhost:3131 &nbsp;·&nbsp; Market Research</em></div>
+          <div class="shot-body">
+            <div class="mk mk-market">
+              <div class="mkm-head">
+                <div>
+                  <div class="mkm-eyebrow">Market fit</div>
+                  <div class="mkm-title">Platform Engineer <span>· Remote (US)</span></div>
+                </div>
+                <div class="mkm-stats">
+                  <div><b>342</b><span>current roles</span></div>
+                  <div><b>58%</b><span>reachable at 6 yrs</span></div>
+                  <div><b>41%</b><span>remote</span></div>
+                </div>
+              </div>
+
+              <div class="mkm-body">
+                <div class="mkm-panel">
+                  <div class="mkm-sub">Seniority mix</div>
+                  <div class="mkm-bars">
+                    <div class="mkm-brow"><span class="mkm-lab">Junior / Entry</span><div class="mkm-track"><span style="width:8%"></span></div><span class="mkm-c">28</span></div>
+                    <div class="mkm-brow"><span class="mkm-lab">Mid-Level</span><div class="mkm-track"><span style="width:24%"></span></div><span class="mkm-c">82</span></div>
+                    <div class="mkm-brow on"><span class="mkm-lab">Senior</span><div class="mkm-track"><span style="width:46%"></span></div><span class="mkm-c">158</span></div>
+                    <div class="mkm-brow"><span class="mkm-lab">Staff / Lead+</span><div class="mkm-track"><span style="width:22%"></span></div><span class="mkm-c">74</span></div>
+                  </div>
+                </div>
+
+                <div class="mkm-panel">
+                  <div class="mkm-sub">Roles posted per week <span>last 10 weeks</span></div>
+                  <div class="mkm-spark">
+                    <span style="height:42%"></span><span style="height:55%"></span><span style="height:38%"></span>
+                    <span style="height:61%"></span><span style="height:70%"></span><span style="height:58%"></span>
+                    <span style="height:74%"></span><span style="height:88%"></span><span style="height:80%"></span>
+                    <span class="hot" style="height:100%"></span>
+                  </div>
+                  <div class="mkm-trendnote"><span class="dot"></span> Hiring up 34% over the last month</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ WHAT SIFT WON'T DO ============ -->
+    <section class="wont" id="wont">
+      <div class="wrap wont-inner">
+        <div class="wont-head">
+          <h2 class="section-title light">What Sift won't do</h2>
+          <p>The job market runs on volume and dark patterns. Sift is built the other way. You stay in control of every application, and your data is never the product.</p>
+        </div>
+        <ul class="wont-list">
+          <li>No auto-apply. Sift never sends an application for you.</li>
+          <li>No spray and pray. Fewer, better applications beat a hundred bad ones.</li>
+          <li>No invented experience. It scores your real resume, it never fabricates one.</li>
+          <li>No selling your data. Your search is yours, not an ad-targeting profile.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ FINAL CTA ============ -->
+    <section class="cta">
+      <div class="wrap cta-inner">
+        <h2>Stop scrolling.<br />Start sifting.</h2>
+        <a class="btn btn-lg" href="https://github.com/jakemercure28/sift-roles">Get it on GitHub</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="foot">
+    <div class="wrap foot-inner">
+      <a class="brand small" href="#top" aria-label="Sift home">
+        <svg class="brand-mark" width="22" height="22" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" shape-rendering="crispEdges">
+          <path d="M7 9h50v10H7zM13 21h38v8h-6v7h-7v16H26V36h-7v-7h-6z" fill="currentColor" />
+          <path d="M17 13h7v3h-7zM29 13h7v3h-7zM41 13h7v3h-7zM24 25h16v4H24z" fill="var(--brand-cutout)" />
+        </svg>
+        <span class="brand-word">sift</span>
+      </a>
+      <nav class="foot-links" aria-label="Footer">
+        <a href="#how">How it works</a>
+        <a href="#wont">What Sift won't do</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+        <a href="https://github.com/jakemercure28/sift-roles">GitHub</a>
+      </nav>
+      <span class="foot-copy">© 2026 Sift</span>
+    </div>
+  </footer>
+</body>
+</html>

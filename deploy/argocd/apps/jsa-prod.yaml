@@ -1,0 +1,22 @@
+# PROD: tracks main, MANUAL sync only (no automated block). Prod cutover is
+# Phase 8, gated on Jake's explicit go; until then this app stays OutOfSync
+# on purpose and syncing it is a deliberate human action:
+#   argocd app sync jsa-prod   (after reviewing argocd app diff jsa-prod)
+# Do not add automated sync here without Jake's sign-off.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jsa-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:jakemercure28/job-search-automation-private.git
+    targetRevision: main
+    path: deploy/k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jsa-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

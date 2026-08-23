@@ -1,0 +1,44 @@
+# Self-healing infra agent. See deploy/argocd/apps/opsagent.yaml.
+#
+# Deliberately NO `namespace:` transformer here. Every resource sets its own
+# metadata.namespace, and this overlay spans three of them: the workload lives in
+# monitoring, but rbac.yaml also carries the write Roles for jsa-prod and
+# jsa-staging. A namespace transformer rewrites those two Roles to monitoring,
+# which both collapses them into a duplicate-ID build error and would have put
+# the agent's write grant in the wrong namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+  # Holds the Gemini API key, sealed to this cluster. It is the same key
+  # jsa-prod/jsa-secrets already carries, re-sealed for this namespace because
+  # SealedSecrets are namespace-scoped. Safe in git: only this cluster's
+  # controller can decrypt it.
+  - opsagent-sealedsecret.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: jsa
+
+# The agent runs the `opsagent` subcommand of the go-backend binary, so it needs
+# an image that CONTAINS that subcommand. This tag is pinned separately from the
+# jsa-prod overlay on purpose:
+#
+# CI pushes code and the image-tag bump as two commits, so an auto-syncing Argo
+# app can apply new manifests onto an image that does not exist yet and land in a
+# 404 crashloop. The opsagent app is therefore MANUAL sync (see its Application),
+# and this tag must be set to a build that already exists in the registry and
+# already carries `server opsagent`.
+#
+# There is NO `latest` tag in this registry — CI tags images with the first 12
+# characters of the commit SHA, so `latest` would ImagePullBackOff. Pin to a tag
+# that exists AND already carries the opsagent subcommand; verify with:
+#   docker run --rm --entrypoint /server <image> opsagent
+# which should fail on a missing GEMINI_API_KEY rather than an unknown command.
+images:
+  - name: localhost:5000/jsa/go-backend
+    newTag: d44a7c466f4a

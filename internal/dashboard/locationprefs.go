@@ -1,94 +1,39 @@
 package dashboard
 
 import (
-	_ "embed"
 	"encoding/json"
-	"os"
-	"path/filepath"
+
+	"job-search-automation/internal/jobfilter"
 )
 
-// This file ports lib/location-prefs.js: the metro list and the user's saved
-// location filter preferences (location.json in the data dir).
+// The metro list and saved location prefs (location.json in the data dir) live
+// in internal/jobfilter; these aliases keep the dashboard-local names so the
+// rest of the package reads unchanged.
 
-// metrosJSON is an embedded copy of config/metros.json. A test
-// (locationprefs_test.go) asserts it stays identical to the repo copy.
-//
-//go:embed metros.json
-var metrosJSON []byte
-
-// metroKeys is the set of valid metro keys, parsed from metrosJSON once.
-var metroKeys = func() map[string]struct{} {
-	var m map[string]json.RawMessage
-	_ = json.Unmarshal(metrosJSON, &m)
-	keys := make(map[string]struct{}, len(m))
-	for k := range m {
-		keys[k] = struct{}{}
-	}
-	return keys
-}()
+// metrosJSON is the embedded copy of config/metros.json (owned by jobfilter). A
+// test (locationprefs_test.go) asserts it stays identical to the repo copy.
+var metrosJSON = jobfilter.MetrosJSON()
 
 // MetrosRaw returns the raw metros object for API responses (matches loadMetros).
-func MetrosRaw() json.RawMessage { return json.RawMessage(metrosJSON) }
+func MetrosRaw() json.RawMessage { return jobfilter.MetrosRaw() }
 
 // LocationPrefs mirrors the normalized prefs shape in lib/location-prefs.js.
-type LocationPrefs struct {
-	Metros         []string `json:"metros"`
-	IncludeUnknown bool     `json:"includeUnknown"`
-	RemoteOnly     bool     `json:"remoteOnly"`
-}
-
-const prefsFilename = "location.json"
+type LocationPrefs = jobfilter.Prefs
 
 // rawPrefs decodes an untrusted prefs payload. Pointers distinguish "absent"
 // from an explicit false (includeUnknown defaults true, remoteOnly defaults false).
-type rawPrefs struct {
-	Metros         []string `json:"metros"`
-	IncludeUnknown *bool    `json:"includeUnknown"`
-	RemoteOnly     *bool    `json:"remoteOnly"`
-}
+type rawPrefs = jobfilter.RawPrefs
 
-// normalizePrefs filters metros to valid keys and applies the default rules,
-// mirroring normalizePrefs. Metros is always a non-nil slice so it marshals to [].
-func normalizePrefs(raw rawPrefs) LocationPrefs {
-	metros := []string{}
-	for _, k := range raw.Metros {
-		if _, ok := metroKeys[k]; ok {
-			metros = append(metros, k)
-		}
-	}
-	includeUnknown := raw.IncludeUnknown == nil || *raw.IncludeUnknown != false
-	remoteOnly := raw.RemoteOnly != nil && *raw.RemoteOnly
-	return LocationPrefs{Metros: metros, IncludeUnknown: includeUnknown, RemoteOnly: remoteOnly}
-}
+// normalizePrefs filters metros to valid keys and applies the default rules.
+func normalizePrefs(raw rawPrefs) LocationPrefs { return jobfilter.Normalize(raw) }
 
-func defaultPrefs() LocationPrefs {
-	return LocationPrefs{Metros: []string{}, IncludeUnknown: true, RemoteOnly: false}
-}
+func defaultPrefs() LocationPrefs { return jobfilter.Default() }
 
 // loadPrefs reads dataDir/location.json, returning defaults if absent/invalid.
-func loadPrefs(dataDir string) LocationPrefs {
-	data, err := os.ReadFile(filepath.Join(dataDir, prefsFilename))
-	if err != nil {
-		return defaultPrefs()
-	}
-	var raw rawPrefs
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return defaultPrefs()
-	}
-	return normalizePrefs(raw)
-}
+func loadPrefs(dataDir string) LocationPrefs { return jobfilter.Load(dataDir) }
 
-// savePrefs normalizes and writes prefs to dataDir/location.json (2-space indent
-// + trailing newline, matching savePrefs), returning the normalized result.
+// savePrefs normalizes and writes prefs to dataDir/location.json, returning the
+// normalized result.
 func savePrefs(dataDir string, raw rawPrefs) (LocationPrefs, error) {
-	prefs := normalizePrefs(raw)
-	out, err := json.MarshalIndent(prefs, "", "  ")
-	if err != nil {
-		return prefs, err
-	}
-	out = append(out, '\n')
-	if err := os.WriteFile(filepath.Join(dataDir, prefsFilename), out, 0o644); err != nil {
-		return prefs, err
-	}
-	return prefs, nil
+	return jobfilter.Save(dataDir, raw)
 }

@@ -11,23 +11,37 @@
  * contract bridge has been removed. They still apply to every scraper, so the
  * emitted JobLead/id is unchanged from the bridged era.
  */
-import type { JobLead, IdentifiedLead } from './types.js';
+import type {
+  JobLead,
+  IdentifiedLead,
+  BoardRef,
+  BoardFetchResult,
+} from './types.js';
 import { APP_ROOT, getProfileDir } from './lib/interop.js';
+import { HostPacer } from './lib/http.js';
+import { scrapeBoardsConditional } from './lib/boardfetch.js';
+import type { BoardScrapeOutcome } from './lib/boardfetch.js';
 import { deriveJobId } from './lib/joblead.js';
 import { validateJobs } from './lib/validate.js';
 import { isOnboarded } from './lib/onboarding.js';
-import { scrapeGreenhouse } from './scrapers/greenhouse.js';
-import { scrapeLever } from './scrapers/lever.js';
-import { scrapeAshby } from './scrapers/ashby.js';
+import { scrapeGreenhouse, greenhouseOptions } from './scrapers/greenhouse.js';
+import { scrapeLever, leverOptions } from './scrapers/lever.js';
+import { scrapeAshby, ashbyOptions } from './scrapers/ashby.js';
 import { scrapeRemoteOK } from './scrapers/remoteok.js';
 import { scrapeJobicy } from './scrapers/jobicy.js';
 import { scrapeArbeitnow } from './scrapers/arbeitnow.js';
 import { scrapeWellfound } from './scrapers/wellfound.js';
 import { scrapeWWR } from './scrapers/wwr.js';
-import { scrapeWorkable } from './scrapers/workable.js';
-import { scrapeWorkday } from './scrapers/workday.js';
+import { scrapeWorkable, scrapeWorkableBoards } from './scrapers/workable.js';
+import { scrapeWorkday, scrapeWorkdayBoards } from './scrapers/workday.js';
+import type { WorkdayCompany } from './scrapers/workday.js';
 import { scrapeBuiltin } from './scrapers/builtin.js';
 import { scrapeRippling } from './scrapers/rippling.js';
+import { scrapeGem, scrapeGemBoards } from './scrapers/gem.js';
+import {
+  scrapeSmartRecruiters,
+  scrapeSmartRecruitersBoards,
+} from './scrapers/smartrecruiters.js';
 
 type ScrapeFn = () => Promise<JobLead[]>;
 
@@ -45,6 +59,8 @@ const SCRAPERS: Record<string, ScrapeFn> = {
   workday: scrapeWorkday,
   builtin: scrapeBuiltin,
   rippling: scrapeRippling,
+  gem: scrapeGem,
+  smartrecruiters: scrapeSmartRecruiters,
 };
 
 // Canonical platform order, preserved so the cross-platform dedupe in runScrape
@@ -62,6 +78,8 @@ const PLATFORM_ORDER = [
   'workday',
   'builtin',
   'rippling',
+  'gem',
+  'smartrecruiters',
 ] as const;
 
 function loadScrapeFn(platform: string): ScrapeFn {
@@ -133,11 +151,19 @@ export async function runScrape(
 
   const settled = await Promise.allSettled(platforms.map(runPlatform));
 
+  const results: JobLead[][] = [];
+  for (const result of settled) {
+    if (result.status === 'fulfilled') results.push(result.value);
+  }
+  return identifyAndDedupe(results);
+}
+
+/** Cross-platform id derivation + dedupe shared by both scrape modes. */
+function identifyAndDedupe(results: JobLead[][]): IdentifiedLead[] {
   const seen = new Set<string>();
   const jobs: IdentifiedLead[] = [];
-  for (const result of settled) {
-    if (result.status !== 'fulfilled') continue;
-    for (const lead of result.value) {
+  for (const leads of results) {
+    for (const lead of leads) {
       if (!lead.direct_apply_url) continue;
       const id = deriveJobId(lead);
       if (seen.has(id)) continue;
@@ -146,4 +172,102 @@ export async function runScrape(
     }
   }
   return jobs;
+}
+
+// Board mode spaces request starts to the same host: the cross-tenant board
+// union can put thousands of boards on one ATS API host in a single pass.
+const BOARD_HOST_MIN_INTERVAL_MS = 150;
+
+/** Platforms board mode can scrape (the registry's verified board platforms). */
+export const BOARD_PLATFORMS = [
+  'greenhouse',
+  'lever',
+  'ashby',
+  'workable',
+  'workday',
+  'gem',
+  'smartrecruiters',
+] as const;
+
+/** What one board-mode scrape produced. */
+export interface BoardScrapeReport {
+  jobs: IdentifiedLead[];
+  // Per-board fetch outcomes for the single-request platforms, so the caller
+  // can persist etag/content-hash state and skip unchanged boards next cycle.
+  boards: BoardFetchResult[];
+}
+
+/**
+ * Board mode: scrape exactly the given boards, returning ALL live postings
+ * with no search-term filtering (term matching happens Go-side when the
+ * harvest is distributed to tenants). Reads no profile files, so the
+ * onboarding gate does not apply. Validation, id derivation, and
+ * cross-platform dedupe are identical to runScrape, so a lead scraped in
+ * either mode carries the same id. Single-request boards (greenhouse, lever,
+ * ashby) fetch conditionally against the etag/contentHash carried on the
+ * BoardRef and are skipped when unchanged.
+ */
+export async function runBoardScrape(
+  boards: BoardRef[]
+): Promise<BoardScrapeReport> {
+  const pacer = new HostPacer(BOARD_HOST_MIN_INTERVAL_MS);
+
+  const refs = (platform: string): BoardRef[] => {
+    const seen = new Set<string>();
+    return boards.filter((b) => {
+      if (b.platform !== platform || !b.slug || seen.has(b.slug)) return false;
+      seen.add(b.slug);
+      return true;
+    });
+  };
+
+  const workdayEntries: WorkdayCompany[] = [];
+  const seenWorkday = new Set<string>();
+  for (const b of boards) {
+    if (b.platform !== 'workday' || !b.slug || !b.wd || !b.board) continue;
+    const key = `${b.slug}/${b.board}`;
+    if (seenWorkday.has(key)) continue;
+    seenWorkday.add(key);
+    workdayEntries.push({
+      sub: b.slug,
+      wd: b.wd,
+      board: b.board,
+      label: b.label || '',
+    });
+  }
+
+  const runs: Promise<BoardScrapeOutcome>[] = [];
+  const asOutcome = (p: Promise<JobLead[]>): Promise<BoardScrapeOutcome> =>
+    p.then((leads) => ({ leads, results: [] }));
+
+  const greenhouse = refs('greenhouse');
+  if (greenhouse.length)
+    runs.push(
+      scrapeBoardsConditional(greenhouseOptions([]), greenhouse, pacer)
+    );
+  const lever = refs('lever');
+  if (lever.length)
+    runs.push(scrapeBoardsConditional(leverOptions([]), lever, pacer));
+  const ashby = refs('ashby');
+  if (ashby.length)
+    runs.push(scrapeBoardsConditional(ashbyOptions([]), ashby, pacer));
+  const workable = refs('workable');
+  if (workable.length)
+    runs.push(asOutcome(scrapeWorkableBoards(workable.map((b) => b.slug))));
+  if (workdayEntries.length) runs.push(scrapeWorkdayBoards(workdayEntries));
+  const gem = refs('gem');
+  if (gem.length) runs.push(scrapeGemBoards(gem.map((b) => b.slug)));
+  const smartrecruiters = refs('smartrecruiters');
+  if (smartrecruiters.length)
+    runs.push(scrapeSmartRecruitersBoards(smartrecruiters.map((b) => b.slug)));
+
+  const settled = await Promise.allSettled(runs);
+  const leadSets: JobLead[][] = [];
+  const boardResults: BoardFetchResult[] = [];
+  for (const result of settled) {
+    if (result.status !== 'fulfilled') continue;
+    leadSets.push(validateJobs(result.value.leads, 'board'));
+    boardResults.push(...result.value.results);
+  }
+  return { jobs: identifyAndDedupe(leadSets), boards: boardResults };
 }

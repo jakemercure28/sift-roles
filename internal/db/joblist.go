@@ -87,6 +87,7 @@ type ListedJob struct {
 	RejectedFromStage string
 	RejectedAt        string
 	ApplyComplexity   string
+	ArchiveReason     string
 }
 
 // filterWhere maps a dashboard filter to its WHERE clause (no user input enters
@@ -104,7 +105,7 @@ var filterWhere = map[string]string{
 
 const listedJobCols = `id, title, company, url, platform, location, posted_at, created_at,
 	updated_at, description, score, reasoning, rejection_reasoning, status, stage,
-	applied_at, rejected_from_stage, rejected_at, apply_complexity`
+	applied_at, rejected_from_stage, rejected_at, apply_complexity, archive_reason`
 
 // listedJobColsLight is listedJobCols minus the three large free-text columns
 // (description, reasoning, rejection_reasoning). The dashboard list view filters,
@@ -115,7 +116,7 @@ const listedJobCols = `id, title, company, url, platform, location, posted_at, c
 // list load from dragging megabytes across the pooler on every cache miss.
 const listedJobColsLight = `id, title, company, url, platform, location, posted_at,
 	created_at, updated_at, score, status, stage, applied_at, rejected_from_stage,
-	rejected_at, apply_complexity`
+	rejected_at, apply_complexity, archive_reason`
 
 func filteredJobsWhere(filter string) (string, bool) {
 	switch filter {
@@ -182,12 +183,12 @@ func scanListedJobs(rows Rows) ([]ListedJob, error) {
 		var j ListedJob
 		var title, company, status sql.NullString
 		var url, platform, location, postedAt, createdAt, updatedAt, description sql.NullString
-		var reasoning, rejReason, stage, appliedAt, rejFrom, rejAt, complexity sql.NullString
+		var reasoning, rejReason, stage, appliedAt, rejFrom, rejAt, complexity, archiveReason sql.NullString
 		var score sql.NullInt64
 		if err := rows.Scan(
 			&j.ID, &title, &company, &url, &platform, &location, &postedAt, &createdAt,
 			&updatedAt, &description, &score, &reasoning, &rejReason, &status, &stage,
-			&appliedAt, &rejFrom, &rejAt, &complexity,
+			&appliedAt, &rejFrom, &rejAt, &complexity, &archiveReason,
 		); err != nil {
 			return nil, err
 		}
@@ -197,6 +198,7 @@ func scanListedJobs(rows Rows) ([]ListedJob, error) {
 		j.Description, j.Reasoning, j.RejectionReason = description.String, reasoning.String, rejReason.String
 		j.Stage, j.AppliedAt = stage.String, appliedAt.String
 		j.RejectedFromStage, j.RejectedAt, j.ApplyComplexity = rejFrom.String, rejAt.String, complexity.String
+		j.ArchiveReason = archiveReason.String
 		if score.Valid {
 			v := int(score.Int64)
 			j.Score = &v
@@ -225,12 +227,12 @@ func (r *Repository) FilteredJobsLight(filter, orderBy string) ([]ListedJob, err
 		var j ListedJob
 		var title, company, status sql.NullString
 		var url, platform, location, postedAt, createdAt, updatedAt sql.NullString
-		var stage, appliedAt, rejFrom, rejAt, complexity sql.NullString
+		var stage, appliedAt, rejFrom, rejAt, complexity, archiveReason sql.NullString
 		var score sql.NullInt64
 		if err := rows.Scan(
 			&j.ID, &title, &company, &url, &platform, &location, &postedAt,
 			&createdAt, &updatedAt, &score, &status, &stage, &appliedAt, &rejFrom,
-			&rejAt, &complexity,
+			&rejAt, &complexity, &archiveReason,
 		); err != nil {
 			return nil, err
 		}
@@ -239,6 +241,7 @@ func (r *Repository) FilteredJobsLight(filter, orderBy string) ([]ListedJob, err
 		j.PostedAt, j.CreatedAt, j.UpdatedAt = postedAt.String, createdAt.String, updatedAt.String
 		j.Stage, j.AppliedAt = stage.String, appliedAt.String
 		j.RejectedFromStage, j.RejectedAt, j.ApplyComplexity = rejFrom.String, rejAt.String, complexity.String
+		j.ArchiveReason = archiveReason.String
 		if score.Valid {
 			v := int(score.Int64)
 			j.Score = &v
@@ -299,12 +302,12 @@ func (r *Repository) FilteredJobsLightSearch(filter, orderBy, q string, minScore
 		var j ListedJob
 		var title, company, status sql.NullString
 		var url, platform, location, postedAt, createdAt, updatedAt sql.NullString
-		var stage, appliedAt, rejFrom, rejAt, complexity sql.NullString
+		var stage, appliedAt, rejFrom, rejAt, complexity, archiveReason sql.NullString
 		var score sql.NullInt64
 		if err := rows.Scan(
 			&j.ID, &title, &company, &url, &platform, &location, &postedAt,
 			&createdAt, &updatedAt, &score, &status, &stage, &appliedAt, &rejFrom,
-			&rejAt, &complexity,
+			&rejAt, &complexity, &archiveReason,
 		); err != nil {
 			return nil, err
 		}
@@ -313,6 +316,7 @@ func (r *Repository) FilteredJobsLightSearch(filter, orderBy, q string, minScore
 		j.PostedAt, j.CreatedAt, j.UpdatedAt = postedAt.String, createdAt.String, updatedAt.String
 		j.Stage, j.AppliedAt = stage.String, appliedAt.String
 		j.RejectedFromStage, j.RejectedAt, j.ApplyComplexity = rejFrom.String, rejAt.String, complexity.String
+		j.ArchiveReason = archiveReason.String
 		if score.Valid {
 			v := int(score.Int64)
 			j.Score = &v
@@ -367,12 +371,12 @@ func (r *Repository) FilteredJobsLightPage(filter, orderBy string, minScore, lim
 		var j ListedJob
 		var title, company, status sql.NullString
 		var url, platform, location, postedAt, createdAt, updatedAt sql.NullString
-		var stage, appliedAt, rejFrom, rejAt, complexity sql.NullString
+		var stage, appliedAt, rejFrom, rejAt, complexity, archiveReason sql.NullString
 		var score sql.NullInt64
 		if err := rows.Scan(
 			&j.ID, &title, &company, &url, &platform, &location, &postedAt,
 			&createdAt, &updatedAt, &score, &status, &stage, &appliedAt, &rejFrom,
-			&rejAt, &complexity,
+			&rejAt, &complexity, &archiveReason,
 		); err != nil {
 			return nil, err
 		}
@@ -381,6 +385,7 @@ func (r *Repository) FilteredJobsLightPage(filter, orderBy string, minScore, lim
 		j.PostedAt, j.CreatedAt, j.UpdatedAt = postedAt.String, createdAt.String, updatedAt.String
 		j.Stage, j.AppliedAt = stage.String, appliedAt.String
 		j.RejectedFromStage, j.RejectedAt, j.ApplyComplexity = rejFrom.String, rejAt.String, complexity.String
+		j.ArchiveReason = archiveReason.String
 		if score.Valid {
 			v := int(score.Int64)
 			j.Score = &v

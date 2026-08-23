@@ -158,3 +158,36 @@ func TestRenderJobTitleRejectsNonHTTPScheme(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderJobCardArchiveReasonBadge(t *testing.T) {
+	render := func(j Job) string {
+		return renderJobCard(j, map[string]int{}, map[string][]string{})
+	}
+
+	// Auto-archived rows get a labeled badge.
+	got := render(Job{ID: "a1", Title: "Buried Role", Company: "Acme", Status: "archived", ArchiveReason: "dedup_repost"})
+	if !strings.Contains(got, "complexity-badge archive-reason") {
+		t.Fatalf("archived job with a reason should render the archive-reason badge: %q", got)
+	}
+	if !strings.Contains(got, "Duplicate: repost") {
+		t.Fatalf("dedup_repost should render its human label: %q", got)
+	}
+
+	// Unknown vocabulary falls back to the raw token instead of hiding it.
+	got = render(Job{ID: "a2", Title: "Buried Role", Company: "Acme", Status: "archived", ArchiveReason: "future_reason"})
+	if !strings.Contains(got, "future_reason") {
+		t.Fatalf("unknown archive reason should render as-is: %q", got)
+	}
+
+	// A NULL/empty reason is a manual archive: no badge.
+	got = render(Job{ID: "a3", Title: "Buried Role", Company: "Acme", Status: "archived"})
+	if strings.Contains(got, "archive-reason") {
+		t.Fatalf("manually archived job should not render an archive-reason badge: %q", got)
+	}
+
+	// A stale reason on a non-archived row must not leak into other views.
+	got = render(Job{ID: "a4", Title: "Restored Role", Company: "Acme", Status: "pending", ArchiveReason: "low_score"})
+	if strings.Contains(got, "archive-reason") {
+		t.Fatalf("non-archived job should not render an archive-reason badge: %q", got)
+	}
+}

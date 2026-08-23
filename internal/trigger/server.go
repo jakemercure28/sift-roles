@@ -26,14 +26,18 @@ type Runner interface {
 type Server struct {
 	runner Runner
 	log    *slog.Logger
-	// scrapeTimeout bounds the background scrape, independent of the short-lived
-	// HTTP request that kicked it off.
+	// scrapeTimeout bounds a per-tenant background scrape, independent of the
+	// short-lived HTTP request that kicked it off.
 	scrapeTimeout time.Duration
+	// fullCycleTimeout bounds an empty-user scrape, which runs a full cycle
+	// (the cross-tenant board union in global mode, or the all-tenant fan-out)
+	// and so can legitimately run far longer than one tenant's scrape.
+	fullCycleTimeout time.Duration
 }
 
 // New builds a trigger Server.
-func New(runner Runner, scrapeTimeout time.Duration, log *slog.Logger) *Server {
-	return &Server{runner: runner, log: log, scrapeTimeout: scrapeTimeout}
+func New(runner Runner, scrapeTimeout, fullCycleTimeout time.Duration, log *slog.Logger) *Server {
+	return &Server{runner: runner, log: log, scrapeTimeout: scrapeTimeout, fullCycleTimeout: fullCycleTimeout}
 }
 
 // Handler returns the HTTP routes: POST /scrape and GET /health.
@@ -65,7 +69,11 @@ func (s *Server) handleScrape(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body)
 	}
-	if s.runner.TryStart(r.Context(), s.scrapeTimeout, body.UserID) {
+	timeout := s.fullCycleTimeout
+	if body.UserID != "" {
+		timeout = s.scrapeTimeout
+	}
+	if s.runner.TryStart(r.Context(), timeout, body.UserID) {
 		if body.UserID != "" {
 			s.log.Info("scrape triggered via dashboard", "user_id", body.UserID)
 		} else {

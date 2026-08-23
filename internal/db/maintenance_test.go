@@ -191,3 +191,79 @@ func TestAutoGhostStale(t *testing.T) {
 		t.Fatalf("second AutoGhostStale = (%d,%v), want (0,nil)", again, err)
 	}
 }
+
+func TestArchiveStaleUnscored(t *testing.T) {
+	repo := newTestRepo(t)
+
+	seed := func(id, status, postedAt, firstSeenAt string, score *int) {
+		t.Helper()
+		_, err := repo.db.Exec(
+			`INSERT INTO jobs (id, title, company, url, platform, status, score, posted_at, first_seen_at)
+			 VALUES (?, ?, ?, ?, 'greenhouse', ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
+			id, "T "+id, "C", "https://example.com/"+id, status, score, postedAt, firstSeenAt,
+		)
+		if err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	scored := 6
+
+	seed("old", "pending", "2026-01-01 00:00:00", "", nil)
+	seed("fresh", "pending", "2026-12-01 00:00:00", "", nil)
+	// Junk posted_at falls back to first_seen_at for the age check.
+	seed("junk-old-seen", "pending", "Posted 6 Days Ago", "2026-01-01 00:00:00", nil)
+	seed("junk-fresh-seen", "pending", "Posted 6 Days Ago", "2026-12-01 00:00:00", nil)
+	// No usable date at all: leave the row alone.
+	seed("dateless", "pending", "", "", nil)
+	// Old but already scored, or not pending: never touched.
+	seed("old-scored", "pending", "2026-01-01 00:00:00", "", &scored)
+	seed("old-applied", "applied", "2026-01-01 00:00:00", "", nil)
+
+	// Pin "old" to be well past the window and "fresh" inside it regardless of
+	// the test run date.
+	if _, err := repo.db.Exec(`UPDATE jobs SET posted_at=datetime('now','-45 days') WHERE id IN ('old','old-scored','old-applied')`); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if _, err := repo.db.Exec(`UPDATE jobs SET posted_at=datetime('now','-5 days') WHERE id='fresh'`); err != nil {
+		t.Fatalf("freshen: %v", err)
+	}
+	if _, err := repo.db.Exec(`UPDATE jobs SET first_seen_at=datetime('now','-45 days') WHERE id='junk-old-seen'`); err != nil {
+		t.Fatalf("backdate seen: %v", err)
+	}
+	if _, err := repo.db.Exec(`UPDATE jobs SET first_seen_at=datetime('now','-5 days') WHERE id='junk-fresh-seen'`); err != nil {
+		t.Fatalf("freshen seen: %v", err)
+	}
+
+	n, err := repo.ArchiveStaleUnscored(30)
+	if err != nil {
+		t.Fatalf("ArchiveStaleUnscored: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("archived %d, want 2", n)
+	}
+
+	wantArchived := map[string]bool{
+		"old": true, "junk-old-seen": true,
+		"fresh": false, "junk-fresh-seen": false, "dateless": false,
+		"old-scored": false, "old-applied": false,
+	}
+	for id, want := range wantArchived {
+		var status string
+		var reason sql.NullString
+		if err := repo.db.QueryRow(`SELECT status, archive_reason FROM jobs WHERE id=?`, id).Scan(&status, &reason); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		if want {
+			if status != "archived" || reason.String != ArchiveReasonStaleUnscored {
+				t.Errorf("%s = (%q,%q), want (archived,%s)", id, status, reason.String, ArchiveReasonStaleUnscored)
+			}
+		} else if status == "archived" && reason.String == ArchiveReasonStaleUnscored {
+			t.Errorf("%s unexpectedly archived as stale", id)
+		}
+	}
+
+	// Idempotent.
+	if again, err := repo.ArchiveStaleUnscored(30); err != nil || again != 0 {
+		t.Fatalf("second ArchiveStaleUnscored = (%d,%v), want (0,nil)", again, err)
+	}
+}

@@ -73,11 +73,11 @@ const scoringBannerSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" hei
 // preserves their document order, so behavior is unchanged. auth.js (emitted just
 // above, non-deferred) still runs first.
 const pageScripts = `<script defer src="/public/js/nav.js?v=11"></script>
-<script defer src="/public/js/ui.js?v=11"></script>
-<script defer src="/public/js/pipeline.js?v=2"></script>
+<script defer src="/public/js/ui.js?v=12"></script>
+<script defer src="/public/js/pipeline.js?v=3"></script>
 <script defer src="/public/js/wizard.js?v=9"></script>
 <script defer src="/public/js/settings.js?v=9"></script>
-<script defer src="/public/js/effects.js?v=13"></script>`
+<script defer src="/public/js/effects.js?v=14"></script>`
 
 // RenderPage ports renderDashboard.
 func RenderPage(v PageView) string {
@@ -91,7 +91,10 @@ func RenderPage(v PageView) string {
 	// no jobs. Self-host renders real data inline. See skeleton.go.
 	titleHTML := renderDashboardTitle(v.Filter, v.Stats, v.Heartbeat)
 	filtersHTML := renderFilters(v.Filter, v.Sort, v.Search, v.Prefs, metroOrdered)
-	mainHTML := renderDashboardMainContent(v.BodyHTML, v.Heartbeat)
+	// The stale-resume count is fragment-only: hosted "/" paints a skeleton the
+	// fragment replaces, and the self-host page refreshes via the same fragment
+	// on first hydration, so 0 here never hides the banner for long.
+	mainHTML := renderDashboardMainContent(v.BodyHTML, v.Heartbeat, 0)
 	if v.AuthEnabled {
 		titleHTML = renderSkeletonTitle()
 		filtersHTML = renderSkeletonFilters()
@@ -112,8 +115,21 @@ func RenderPage(v PageView) string {
 <meta name="apple-mobile-web-app-title" content="` + BrandName + `">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161b22">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="` + BrandName + `">
+<meta property="og:title" content="` + BrandName + `, your job search sifted.">
+<meta property="og:description" content="Sift reads your resume and surfaces only the roles worth your time.">
+<meta property="og:url" content="https://app.siftroles.com">
+<meta property="og:image" content="https://siftroles.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="` + BrandName + `, your job search sifted.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="` + BrandName + `, your job search sifted.">
+<meta name="twitter:description" content="Sift reads your resume and surfaces only the roles worth your time.">
+<meta name="twitter:image" content="https://siftroles.com/og.png">
 <title>` + BrandName + `</title>
-<link rel="stylesheet" href="/public/dashboard.css?v=77">
+<link rel="stylesheet" href="/public/dashboard.css?v=80">
 <style id="theme-vars">` + RenderThemeCSS() + `</style>
 ` + pageThemePrepaint + `
 ` + pageChartLoader + `

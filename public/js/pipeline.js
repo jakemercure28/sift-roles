@@ -70,7 +70,10 @@ async function setPipeline(id, value, selectEl) {
       selectEl.dataset.prev = value;
     }
     const label = PIPELINE_LABELS[value] || value;
-    if (UNDOABLE_PIPELINE.includes(value)) {
+    if (value === 'rejected') {
+      // Toast waits for the archive attempt below so one message can say
+      // what actually happened to both the status and the row.
+    } else if (UNDOABLE_PIPELINE.includes(value)) {
       registerUndo(id, prevValue);
       showToast(label, PIPELINE_COLORS[value] || 'var(--slate)', performUndo);
     } else {
@@ -94,9 +97,18 @@ async function setPipeline(id, value, selectEl) {
       if (!arch.ok) {
         // Status saved, but the archive sweep failed; leave the row visible
         // rather than hiding a card that's still in the list.
-        showToast(await errorMessage(arch, 'Could not archive'), 'var(--red)');
+        showToast(
+          'Marked Rejected, but archiving failed. The job stays in the list.',
+          'var(--red)'
+        );
         return;
       }
+      registerUndo(id, prevValue);
+      showToast(
+        'Rejected by employer. Archived.',
+        PIPELINE_COLORS.rejected || 'var(--slate)',
+        performUndo
+      );
       if (row) {
         row.style.transition = 'opacity 0.3s';
         row.style.opacity = '0';

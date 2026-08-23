@@ -1,0 +1,158 @@
+# Tripwire alert rules for the scrape -> harvest -> distribute pipeline.
+#
+# These encode the three failure modes that hid for a full day in July 2026:
+# a platform's registry boards silently not getting scraped, the board scrape
+# eating the whole cycle budget, and a tenant's distribution being starved so
+# its queue never updated. Each rule targets one of those directly.
+#
+# These rules are DELIVERED now: the alerting block in prometheus.yml routes
+# them to the Alertmanager in the k3s monitoring namespace, which hands every
+# alert to the opsagent webhook (docs/opsagent.md). The agent investigates and
+# either applies an allowlisted remediation or opens a GitHub issue.
+#
+# They previously surfaced only in Prometheus /alerts and Grafana's Alerting
+# view, with no receiver configured anywhere, which is how a broken prod scraper
+# went unreported for a day. Write annotations for a reader who has just been
+# handed the alert with no other context: the agent uses them as its first lead.
+groups:
+  # Host-level tripwires. The box now carries k3s on top of the compose
+  # stacks: the k3s image store, the local registry and the migrated PVCs all
+  # grow independently of anything the pipeline rules below watch, and on a
+  # single node a full disk is not a degradation, it is downtime (kubelet
+  # starts evicting pods at nodefs.available<5%). These fire well before that.
+  #
+  # mountpoint is "/", NOT "/host": node-exporter runs with --path.rootfs=/host
+  # and STRIPS that prefix before reporting, so a `/host` matcher silently
+  # matches nothing. The infra dashboard's "Root disk used %" panel carried
+  # exactly that bug and had been dead since it was written.
+  - name: jsa-host
+    rules:
+      - alert: HostDiskFillingUp
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} < 0.15
+        for: 30m
+        labels: { severity: warning, area: infra }
+        annotations:
+          summary: 'Root disk is {{ $value | humanizePercentage }} free ({{ $labels.device }})'
+          description: 'Usual suspects: the k3s image store (/var/lib/rancher), the local registry (/srv/jsa/registry, GC runs weekly via deploy/registry/gc.sh), Loki/Prometheus TSDB, or an archived compose data dir. Reclaim before it reaches 5%, where kubelet evicts pods.'
+
+      - alert: HostDiskCritical
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} < 0.08
+        for: 5m
+        labels: { severity: critical, area: infra }
+        annotations:
+          summary: 'Root disk critically low: {{ $value | humanizePercentage }} free ({{ $labels.device }})'
+          description: 'kubelet evicts pods at 5% free and k3s image GC is already running. Reclaim space now: `docker system prune`, deploy/registry/gc.sh, or drop old TSDB/Loki chunks.'
+
+  - name: jsa-pipeline
+    rules:
+      # A tenant's queue is being starved: distribution has not run for it in
+      # over 2x the 3h cycle. This is the exact bug where the oversized board
+      # scrape ate the cycle budget and distributeTenant never ran.
+      #
+      # Prod-only bound: staging runs its whole pipeline once a day (0 9 * * *),
+      # so a 6.5h bound is guaranteed to fire there every afternoon by design.
+      # Staging gets its own daily-calibrated rule below.
+      - alert: TenantDistributionStalled
+        expr: (time() - jsa_tenant_last_distribution_timestamp_seconds{env="prod"}) / 3600 > 6.5
+        for: 15m
+        labels: { severity: critical, area: pipeline }
+        annotations:
+          summary: 'Tenant {{ $labels.user }} ({{ $labels.env }}) has had no distribution in >6.5h'
+          description: 'Its queue is not being fed from the global cache. Usually the board scrape is consuming the whole cycle budget; check jsa_global_board_scrape_truncated_total and GLOBAL_DISTRIBUTE_RESERVE_MINUTES.'
+
+      # Same failure mode on staging, calibrated to its daily (0 9 * * *)
+      # schedule: one missed daily pass plus slack. Anything not prod uses this
+      # bound so a new env defaults to the looser rule instead of the 6.5h one.
+      - alert: TenantDistributionStalledDaily
+        expr: (time() - jsa_tenant_last_distribution_timestamp_seconds{env!="prod"}) / 3600 > 26
+        for: 15m
+        labels: { severity: critical, area: pipeline }
+        annotations:
+          summary: 'Tenant {{ $labels.user }} ({{ $labels.env }}) has had no distribution in >26h (daily schedule)'
+          description: 'This env runs one pipeline pass per day, so >26h means a whole daily pass distributed nothing for this tenant. Check the env scrape cron and jsa_global_board_scrape_truncated_total.'
+
+      # A platform that has plenty of registry boards is starved (union
+      # ordering / rotation bug) or blocked (adapter/WAF). This is the
+      # Ashby=11-of-3280 regression. Measured on boards that ANSWERED the pass
+      # (ok or unchanged), not on companies that yielded leads: with the
+      # incremental cache mature, most healthy boards report unchanged and
+      # yield zero companies, which made the old companies-based ratio fire
+      # chronically on workday/lever. Two collapse modes:
+      #   starved: the pass touched under 1% of the platform's registry
+      #            (rotating platforms like workday cover ~4%+ per pass)
+      #   blocked: the pass tried a meaningful number of boards but >90% failed
+      - alert: BoardPlatformCoverageCollapsed
+        expr: |
+          (
+            sum by(platform,env) (jsa_global_board_pass_boards)
+              / on(platform,env) jsa_registry_boards < 0.01
+            or
+            (
+              sum by(platform,env) (jsa_global_board_pass_boards{status="failed"})
+                / sum by(platform,env) (jsa_global_board_pass_boards) > 0.9
+              and sum by(platform,env) (jsa_global_board_pass_boards) > 25
+            )
+          )
+          and on(platform,env) jsa_registry_boards > 200
+        for: 3h
+        labels: { severity: warning, area: pipeline }
+        annotations:
+          summary: 'Platform {{ $labels.platform }} ({{ $labels.env }}) board coverage collapsed'
+          description: "This platform's registry holds >200 boards but the last global passes either touched under 1% of them (union-ordering starvation) or saw >90% of attempted fetches fail (blocked adapter). Check the 'Companies harvested by platform' panel and jsa_global_board_pass_boards by status."
+
+      # The board scrape keeps hitting its sub-budget before finishing: the union
+      # is too big for the cycle, so coverage is chronically partial.
+      - alert: GlobalBoardScrapeChronicallyTruncated
+        expr: increase(jsa_global_board_scrape_truncated_total[6h]) >= 2
+        for: 5m
+        labels: { severity: warning, area: pipeline }
+        annotations:
+          summary: 'Global board scrape truncated {{ $value }} times in 6h ({{ $labels.env }})'
+          description: 'The board union no longer fits the cycle budget even with the distribution reserve. Reduce the union (lower GLOBAL_WORKDAY_REGISTRY_BATCH), raise GLOBAL_SCRAPE_TIMEOUT_MINUTES, or rotate the big platforms.'
+
+      # A score batch has been awaiting results well past the ~48h upstream
+      # expiry: the poll loop is failing to close batches (dead loop, revoked
+      # overflow key, or a billing freeze breaking every poll). At 72h the poll
+      # pass evicts it and the age drops back; firing means you are in the
+      # window where wedged rows could be eating BATCH_API_MAX_OPEN_BATCHES
+      # submit slots, or eviction itself is not running.
+      - alert: ScoreBatchStuckOpen
+        expr: jsa_score_batch_oldest_open_age_seconds > 216000 # 60h
+        for: 30m
+        labels: { severity: warning, area: pipeline }
+        annotations:
+          summary: 'Oldest open score batch is {{ $value | humanizeDuration }} old ({{ $labels.env }})'
+          description: 'Batches expire upstream at ~48h, so this one will never return results and the poll loop has not closed it. Inspect with `server batch list` and force-close with `server batch evict <batch-name>`; check the batch-score loop logs and the overflow key.'
+
+  # The self-healing agent watching everything above. It must not become the
+  # component nobody watches, which is precisely the failure it was built to
+  # close: an agent that quietly stops working looks exactly like a quiet week.
+  - name: jsa-opsagent
+    rules:
+      # The self-healing agent keeps handing the same problem back to a human.
+      # Either the underlying fault genuinely needs Jake (fine, but it should
+      # not be silently repeating), or the agent is looping on something it
+      # cannot fix and burning tokens on every firing. Either way the agent has
+      # stopped being useful for this alert and needs looking at.
+      - alert: ChronicOpsAgentEscalation
+        expr: increase(jsa_opsagent_escalations_total[24h]) >= 6
+        for: 30m
+        labels: { severity: warning, area: opsagent }
+        annotations:
+          summary: 'Self-healing agent escalated {{ $value }} times in 24h'
+          description: 'Check the open issues labeled `opsagent` in job-search-automation-private. If they are all the same alert, fix the root cause or silence that alert; if the agent is misdiagnosing, review the transcript before arming any further actions.'
+
+      # Every agent run failed to reach a verdict: the API key, the model, the
+      # cluster API, or the tool loop is broken. The agent is offline as a
+      # safety net even though its pod looks healthy.
+      - alert: OpsAgentRunsFailing
+        expr: increase(jsa_opsagent_runs_total{verdict=~"error|refused|escalation_failed"}[6h]) >= 3
+        for: 15m
+        labels: { severity: warning, area: opsagent }
+        annotations:
+          summary: 'Self-healing agent runs are failing ({{ $labels.verdict }})'
+          description: 'verdict=error means the tool loop or the Claude API failed; refused means safety classifiers declined the request; escalation_failed means the GitHub token cannot open issues, so escalations are being lost. Check `kubectl -n monitoring logs deploy/opsagent`.'

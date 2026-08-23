@@ -1,0 +1,40 @@
+# Prod values, ported from /srv/jsa/prod/.env (non-secret knobs only;
+# secrets live in the jsa-secrets SealedSecret). Notable: EXTRACT_ENABLED=0
+# (extraction was pure waste on prod), SCORING_BATCH_SIZE=1 with the batch
+# API off (deliberate spend-cap posture; do not change without Jake).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jsa-config
+data:
+  DASHBOARD_HOST: siftroles.com
+  DASHBOARD_BASE_URL: https://siftroles.com
+  SUPABASE_URL: https://auth.siftroles.com
+
+  TZ: America/Los_Angeles
+  APP_TIMEZONE: America/Los_Angeles
+
+  RLS_ENFORCE: 'true'
+  PREFILTER_LOCATION: '1'
+  GLOBAL_SCRAPE_ENABLED: '1'
+  EXTRACT_ENABLED: '0'
+  SCORING_BATCH_SIZE: '1'
+  SCORING_BATCH_API_ENABLED: '0'
+  SCORING_CONCURRENCY: '6'
+  SCORING_RESCORE_THRESHOLD: '5'
+
+  # Google's real free-tier ceiling for gemini-3.1-flash-lite is 500 requests/day.
+  # This was 2000, sized for the retired paid key, so the app never tripped its own
+  # breaker and instead walked into the provider's 429 wall every afternoon and
+  # burned a 5x30s retry ladder per call. Keep this at or below the provider quota.
+  GEMINI_HOST_DAILY_LIMIT: '500'
+  # Both of these differ from the base ConfigMap and MUST be pinned here or
+  # the cutover silently changes prod spend behaviour: the base default for
+  # PER_TENANT is 150 (prod runs 300, so migrating unpinned would halve every
+  # tenant's daily quota), and INACTIVE is absent from the base entirely
+  # (prod runs 30, added by #625 to bound idle-tenant scoring).
+  GEMINI_HOST_PER_TENANT_DAILY_LIMIT: '300'
+  GEMINI_HOST_INACTIVE_DAILY_LIMIT: '30'
+  GEMINI_OVERFLOW_RATE_DELAY_MS: '250'
+  GLOBAL_DISTRIBUTE_LIMIT: '2000'
+  CANONICALIZE_SCHEDULE: '0 3 * * *'

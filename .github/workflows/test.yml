@@ -1,11 +1,22 @@
 name: Test
 
+# pull_request only: there's no branch protection on this repo (private, no
+# GitHub Pro), and dev/main only ever advance via squash-merge of an already
+# green PR, so a push-triggered re-run here would just re-test identical code
+# and burn Actions minutes for nothing.
+#
+# self-hosted: private repo, so GitHub-hosted minutes are billed. The ThinkPad
+# runner that already serves deploy.yml is free. See ci.yml for the trade-off.
+#
+# paths-ignore: markdown only. `npm run verify` runs `prettier --check .`, and
+# *.md is in .prettierignore, so a docs-only change cannot fail this. Do NOT
+# extend this to observability/** — that dashboard JSON IS prettier-checked.
+
 on:
   pull_request:
-  push:
-    branches:
-      - dev
-      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 permissions:
   contents: read
@@ -16,7 +27,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thinkpad]
     timeout-minutes: 10
     env:
       DATA_DIR: data.example

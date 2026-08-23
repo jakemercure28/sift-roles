@@ -1,0 +1,21 @@
+# App base: env-agnostic shape of the two-service stack. Overlays set
+# namespace, hosts, env-specific config, image tags, and the host-Postgres
+# endpoint. See docs/k8s-migration.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - pvc.yaml
+  - supabase-db-service.yaml
+  - go-backend/deployment.yaml
+  - go-backend/service.yaml
+  - go-backend/servicemonitor.yaml
+  - scraper-service/deployment.yaml
+  - scraper-service/service.yaml
+  - scraper-service/servicemonitor.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: jsa

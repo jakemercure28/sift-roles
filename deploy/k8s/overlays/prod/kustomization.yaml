@@ -1,0 +1,35 @@
+# PROD overlay. Argo CD tracks this on `main` with MANUAL sync. The manual
+# sync IS the deploy gate: merging this file to main changes nothing until a
+# human runs `argocd app sync jsa-prod` (see docs/k8s-migration.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: jsa-prod
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - ingress.yaml
+  - supabase-db-endpointslice.yaml
+  - sealed-secret.yaml
+
+patches:
+  - path: configmap-patch.yaml
+
+# Hosted service sunset (2026-08-22): zero users, applicant hired. Scaled to
+# zero rather than deleted so the namespace, config, and volumes stay intact
+# for a possible revival. Set counts back to 1 and sync to bring it back.
+replicas:
+  - name: go-backend
+    count: 0
+  - name: scraper-service
+    count: 0
+
+# CI rewrites newTag on every main push (deploy.yml build-push job), but the
+# jsa-prod Argo app is MANUAL sync: nothing reaches the cluster until a human
+# runs `argocd app sync jsa-prod`. Do not hand-edit tags outside an incident.
+images:
+  - name: localhost:5000/jsa/go-backend
+    newTag: 1e626169e69d
+  - name: localhost:5000/jsa/scraper-service
+    newTag: 1e626169e69d

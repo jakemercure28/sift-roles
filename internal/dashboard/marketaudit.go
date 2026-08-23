@@ -278,7 +278,7 @@ func (s *Server) handleMarketResearchAudit(w http.ResponseWriter, _ *http.Reques
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	allTimeJobs, err := s.repo.AllTimeMarketSeniorityJobs()
+	allTimeJobs, err := s.repo.AllTimeMarketSeniorityJobs(s.marketAllTimeWindowDays)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

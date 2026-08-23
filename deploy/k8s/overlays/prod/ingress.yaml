@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jsa
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: siftroles.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-backend
+                port:
+                  number: 3131
+    - host: app.siftroles.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-backend
+                port:
+                  number: 3131
+    # Legacy pre-rebrand host. Still publicly routed through the tunnel and
+    # served prod until the Phase 8 cutover, so it stays here to avoid a
+    # regression. Unlike staging.anitajob.xyz (which sits behind Cloudflare
+    # Access and never served the app), this one is reachable by anyone
+    # holding an old link. Safe to drop once the domain is formally retired.
+    - host: app.anitajob.xyz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-backend
+                port:
+                  number: 3131

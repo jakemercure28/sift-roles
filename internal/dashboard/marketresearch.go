@@ -129,7 +129,7 @@ func (s *Server) loadMarketResearchPageData(analysisError string) (marketResearc
 	})
 	g.Go(func() error {
 		var err error
-		allTimeJobs, err = s.repo.AllTimeMarketSeniorityJobs()
+		allTimeJobs, err = s.repo.AllTimeMarketSeniorityJobs(s.marketAllTimeWindowDays)
 		return err
 	})
 	g.Go(func() error {
@@ -139,7 +139,7 @@ func (s *Server) loadMarketResearchPageData(analysisError string) (marketResearc
 	})
 	g.Go(func() error {
 		var err error
-		allTimeJDCount, err = s.repo.CountAllTimeMarketResearchJobs()
+		allTimeJDCount, err = s.repo.CountAllTimeMarketResearchJobs(s.marketAllTimeWindowDays)
 		return err
 	})
 	g.Go(func() error {

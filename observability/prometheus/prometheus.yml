@@ -1,0 +1,61 @@
+# Prometheus scrape config for the shared jsa-observability stack.
+#
+# This Prometheus no longer scrapes the app at all: both envs run on k3s and
+# push their jsa_* series here by remote_write. What it still scrapes directly
+# is the host- and container-level exporters in THIS project, by service name.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    host: thinkpad
+
+# Tripwire rules for the scrape -> harvest -> distribute pipeline.
+rule_files:
+  - alerts.yml
+
+# Alert delivery. These rules used to fire into Prometheus /alerts and nothing
+# else: no receiver was configured anywhere, so nobody was told. They now route
+# to the one Alertmanager in the k3s monitoring namespace, which hands every
+# alert to the opsagent webhook (see deploy/argocd/apps/monitoring.yaml).
+#
+# host.docker.internal resolves to the docker host via the host-gateway entry in
+# docker-compose.observability.yml. The target is the Alertmanager NodePort:
+# NodePorts bind on every node interface, unlike the loopback-published ports
+# elsewhere in this stack, which host-gateway cannot reach on native Linux.
+# DISABLED in lockstep with alertmanager.enabled in
+# deploy/argocd/apps/monitoring.yaml. With Alertmanager gone the NodePort below
+# does not exist, so leaving this active only produces connection errors every
+# evaluation. Re-enable both together, and only once the opsagent Service
+# resolves. See the ordering note in that file.
+#
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['host.docker.internal:30903']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # NO app scrape jobs live here any more. Prod followed staging onto k3s in
+  # Phase 8, so BOTH envs' jsa_* series now arrive by remote_write from the
+  # cluster Prometheus, already carrying env="prod" / env="staging" (see
+  # deploy/argocd/apps/monitoring.yaml). Every jsa_* query and every rule in
+  # alerts.yml still sees both envs from this one Prometheus, unchanged.
+  #
+  # The old static targets (jsa-prod-go-backend-1:9090 and
+  # jsa-prod-scraper-service-1:4040) pointed at compose containers that are
+  # now stopped, so they sat permanently down and reported a false prod
+  # outage. Nothing queried their `up` series, so retiring the jobs loses no
+  # signal. Restoring them is part of the compose rollback, not a fix.
+
+  # Host CPU / memory / disk / network.
+  - job_name: node-exporter
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Per-container CPU / memory / network / fs (covers every app + infra container).
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']

@@ -18,5 +18,9 @@ COPY --from=build /server /server
 # WORKDIR /app so the dashboard's os.Getwd()-relative reads (.context/people)
 # resolve under the mounted /app tree, matching the Node dashboard's cwd.
 WORKDIR /app
+# Dashboard static assets ship IN the image so they version atomically with
+# the binary. Compose historically bind-mounted ./public over this path; that
+# mount is now redundant (and k8s has no checkout to mount from).
+COPY public /app/public
 ENV DB_DIR=/app/db
 ENTRYPOINT ["/server"]

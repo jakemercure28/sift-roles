@@ -56,19 +56,12 @@ func TestRenderDashboardTitle(t *testing.T) {
 		t.Fatalf("zero rejected title = %q", got)
 	}
 
-	// A healthy heartbeat folds into the status line on the inbox views only.
+	// Scrape freshness is never folded into the title subtitle; it lives in the
+	// dedicated scrape banner, so repeating it here was redundant.
 	hb := &db.Heartbeat{Status: "ok", LastSuccessAt: time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339), Inserted: 2}
-	got := renderDashboardTitle("all", stats, hb)
-	if !strings.Contains(got, "last scrape 5m ago · 2 new this scrape") {
-		t.Fatalf("heartbeat segs missing: %q", got)
-	}
-	if got := renderDashboardTitle("not-applied", stats, hb); !strings.Contains(got, "last scrape") {
-		t.Fatalf("pending inbox title should show heartbeat: %q", got)
-	}
-	if got := renderDashboardTitle("analytics", stats, hb); strings.Contains(got, "last scrape") {
-		t.Fatalf("analytics title should not show heartbeat: %q", got)
-	}
-	if got := renderDashboardTitle("applied", stats, hb); strings.Contains(got, "last scrape") {
-		t.Fatalf("applied title should not show heartbeat: %q", got)
+	for _, filter := range []string{"all", "not-applied", "analytics", "applied"} {
+		if got := renderDashboardTitle(filter, stats, hb); strings.Contains(got, "last scrape") {
+			t.Fatalf("title(%q) should not show scrape freshness: %q", filter, got)
+		}
 	}
 }

@@ -6,7 +6,7 @@
     <p class="report-meta"><span class="report-meta-num">4</span> current roles &middot; <span class="report-meta-num">5</span> all-time &middot; analyzed 4 live JDs &middot; updated Jan 2</p>
     <div class="report-masthead-actions">
       <form method="POST" action="/market-research" class="report-rerun-form" onsubmit="return mrRunSubmit(this)">
-        <button type="submit" class="btn btn-sm btn-archive">Re-run analysis</button>
+        <button type="submit" class="btn btn-sm btn-archive" title="Takes 30 to 60 seconds">Re-run analysis</button>
       </form>
     </div>
   </div>

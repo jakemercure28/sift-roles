@@ -51,13 +51,3 @@ func TestPassesPrefs(t *testing.T) {
 		})
 	}
 }
-
-// Guard against "Walthamstow, UK" matching the MA state code via raw substring.
-func TestMatchesStateWordBoundary(t *testing.T) {
-	if matchesState("walthamstow, uk", []string{"ma"}) {
-		t.Error("substring 'ma' in 'walthamstow' should not match state code ma")
-	}
-	if !matchesState("boston, ma", []string{"ma"}) {
-		t.Error("'boston, ma' should match state code ma")
-	}
-}

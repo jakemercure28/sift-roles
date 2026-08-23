@@ -1,0 +1,10 @@
+# k3s containerd registry mirror config. Copy manually to
+# /etc/rancher/k3s/registries.yaml and `systemctl restart k3s`.
+#
+# The local registry (deploy/registry/) listens on 127.0.0.1:5000 only.
+# containerd pulls happen in the host network namespace, so loopback works.
+# Plain HTTP is acceptable strictly because traffic never leaves loopback.
+mirrors:
+  'localhost:5000':
+    endpoint:
+      - 'http://127.0.0.1:5000'

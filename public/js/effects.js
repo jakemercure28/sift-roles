@@ -16,6 +16,7 @@
   let initialScored = null;
   let reloadedOnce = false;
   let dismissed = false; // user closed the banner with the X
+  let dismissedState = null; // pipeline state at dismissal; a transition re-shows
   let lastMsg = ''; // last message rendered, so we only re-scramble on change
   let lastPollData = null; // latest /api/scoring-progress payload
 
@@ -48,9 +49,23 @@
     if (msgEl) msgEl.textContent = head;
   }
 
-  // The X button calls this. Once dismissed, the poll never re-shows the banner.
+  // Coarse pipeline state, used to decide when a dismissed banner may return.
+  // 'setup' = first scrape still running, 'active' = scoring in flight,
+  // 'idle' = caught up (digest strip).
+  function bannerState(d) {
+    if (!d || typeof d.unscored !== 'number') return null;
+    if (d.total === 0) return 'setup';
+    if (d.scored > 0 && d.unscored === 0) return 'idle';
+    return 'active';
+  }
+
+  // The X button calls this. Dismissal holds only for the current pipeline
+  // state; when the state transitions (e.g. a new scrape starts, or the first
+  // scrape finishes scoring) the banner returns, so a new user who closes it
+  // mid-setup still learns when their jobs land.
   window.dismissScoringBanner = function () {
     dismissed = true;
+    dismissedState = bannerState(lastPollData);
     banner.style.display = 'none';
   };
 
@@ -156,7 +171,11 @@
       .then(function (d) {
         if (!d || typeof d.unscored !== 'number') return;
         lastPollData = d;
-        if (dismissed) return;
+        if (dismissed) {
+          if (bannerState(d) === dismissedState) return;
+          dismissed = false;
+          dismissedState = null;
+        }
         if (!bannerAllowed()) {
           banner.style.display = 'none';
           return;

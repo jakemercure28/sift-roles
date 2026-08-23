@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -42,11 +43,84 @@ type HTTPResult struct {
 // skip instead of closing on uncertainty.
 type Fetcher func(ctx context.Context, rawURL string) (*HTTPResult, error)
 
+// Cache carries probe state across Run calls within one maintenance sweep. The
+// sweep fans out per tenant, and tenants routinely hold the same postings, so
+// sharing one Cache across the sweep means each distinct posting is probed once
+// and each Ashby board is fetched once, no matter how many tenants hold them.
+// Safe for concurrent use.
+type Cache struct {
+	mu       sync.Mutex
+	verdicts map[string]string          // platform|slug|jobID -> "open"|"closed"
+	ashby    map[string]map[string]bool // board slug -> live posting ids
+	slugMu   map[string]*sync.Mutex     // per-slug lock: one board fetch in flight
+}
+
+// NewCache returns an empty probe cache for one maintenance sweep.
+func NewCache() *Cache {
+	return &Cache{
+		verdicts: map[string]string{},
+		ashby:    map[string]map[string]bool{},
+		slugMu:   map[string]*sync.Mutex{},
+	}
+}
+
+func probeKey(e Eligibility) string { return e.Platform + "|" + e.Slug + "|" + e.JobID }
+
+func (c *Cache) verdict(key string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.verdicts[key]
+	return v, ok
+}
+
+// putVerdict caches a definite probe outcome. Skips ("") and errors are never
+// cached: they may be transient, and a later tenant's probe should retry.
+func (c *Cache) putVerdict(key, status string) {
+	if status == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.verdicts[key] = status
+}
+
+func (c *Cache) ashbyBoard(slug string) (map[string]bool, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	jobs, ok := c.ashby[slug]
+	return jobs, ok
+}
+
+func (c *Cache) putAshbyBoard(slug string, jobs map[string]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ashby[slug] = jobs
+}
+
+// slugLock returns the per-slug mutex, creating it on first use. Concurrent
+// checks of the same Ashby board serialize on it so the board is fetched once;
+// checks of different boards (and all Greenhouse probes) stay parallel.
+func (c *Cache) slugLock(slug string) *sync.Mutex {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m, ok := c.slugMu[slug]
+	if !ok {
+		m = &sync.Mutex{}
+		c.slugMu[slug] = m
+	}
+	return m
+}
+
 // Config controls one check pass.
 type Config struct {
 	Concurrency int
 	Delay       time.Duration
 	Fetch       Fetcher
+	Log         *slog.Logger
+	// Cache, when set, shares probe verdicts and Ashby board snapshots with
+	// other Run calls in the same maintenance sweep so cross-tenant duplicate
+	// postings are probed once. Nil gets a fresh per-run cache.
+	Cache *Cache
 }
 
 // Result reports one check pass.
@@ -99,6 +173,20 @@ func AutoCloseEligibility(job db.CloseCheckJob) *Eligibility {
 		}
 		return &Eligibility{Platform: "Ashby", Slug: slug, JobID: uuid}
 	}
+
+	// Gem has no id-prefix scheme (see joblead.ts jobIdFor), so unlike
+	// Greenhouse/Ashby above there is no job.ID invariant to cross-check; the
+	// platform label plus the exact jobs.gem.com host is narrow enough on its
+	// own (Gem does not support custom-domain boards).
+	if platform == "gem" {
+		if u.Scheme != "https" || u.Hostname() != "jobs.gem.com" {
+			return nil
+		}
+		if len(parts) != 2 {
+			return nil
+		}
+		return &Eligibility{Platform: "Gem", Slug: parts[0], JobID: parts[1]}
+	}
 	return nil
 }
 
@@ -139,18 +227,31 @@ func defaultFetcher(client *http.Client) Fetcher {
 }
 
 // CheckJob returns "open", "closed", or "" when the row should be skipped.
-func CheckJob(ctx context.Context, fetch Fetcher, job db.CloseCheckJob, ashbyCache map[string]map[string]bool) (string, error) {
+// Definite verdicts are cached in cache so the same posting held by another
+// tenant (or another row) is not re-probed within the sweep.
+func CheckJob(ctx context.Context, fetch Fetcher, job db.CloseCheckJob, cache *Cache) (string, error) {
 	eligibility := AutoCloseEligibility(job)
 	if eligibility == nil {
 		return "", nil
 	}
+	key := probeKey(*eligibility)
+	if status, ok := cache.verdict(key); ok {
+		return status, nil
+	}
+	var status string
+	var err error
 	switch eligibility.Platform {
 	case "Greenhouse":
-		return checkGreenhouse(ctx, fetch, *eligibility)
+		status, err = checkGreenhouse(ctx, fetch, *eligibility)
 	case "Ashby":
-		return checkAshby(ctx, fetch, *eligibility, ashbyCache)
+		status, err = checkAshby(ctx, fetch, *eligibility, cache)
+	case "Gem":
+		status, err = checkGem(ctx, fetch, *eligibility)
 	}
-	return "", nil
+	if err == nil {
+		cache.putVerdict(key, status)
+	}
+	return status, err
 }
 
 func checkGreenhouse(ctx context.Context, fetch Fetcher, e Eligibility) (string, error) {
@@ -170,11 +271,17 @@ func checkGreenhouse(ctx context.Context, fetch Fetcher, e Eligibility) (string,
 	return "open", nil
 }
 
-func checkAshby(ctx context.Context, fetch Fetcher, e Eligibility, cache map[string]map[string]bool) (string, error) {
-	jobs, ok := cache[e.Slug]
+func checkAshby(ctx context.Context, fetch Fetcher, e Eligibility, cache *Cache) (string, error) {
+	// One board fetch per slug: the per-slug lock makes concurrent checks of the
+	// same board wait for the first fetch instead of duplicating it, while other
+	// boards proceed in parallel.
+	lock := cache.slugLock(e.Slug)
+	lock.Lock()
+	jobs, ok := cache.ashbyBoard(e.Slug)
 	if !ok {
 		res, err := fetch(ctx, "https://api.ashbyhq.com/posting-api/job-board/"+e.Slug)
 		if err != nil || res == nil || res.StatusCode < 200 || res.StatusCode >= 300 {
+			lock.Unlock()
 			return "", err
 		}
 		var board struct {
@@ -183,18 +290,40 @@ func checkAshby(ctx context.Context, fetch Fetcher, e Eligibility, cache map[str
 			} `json:"jobs"`
 		}
 		if err := json.Unmarshal(res.Body, &board); err != nil {
+			lock.Unlock()
 			return "", nil
 		}
 		jobs = map[string]bool{}
 		for _, j := range board.Jobs {
 			jobs[j.ID] = true
 		}
-		cache[e.Slug] = jobs
+		cache.putAshbyBoard(e.Slug, jobs)
 	}
+	lock.Unlock()
 	if jobs[e.JobID] {
 		return "open", nil
 	}
 	return "closed", nil
+}
+
+// checkGem probes the posting's own apply page rather than Gem's GraphQL
+// board-list API: a board whose vanity slug has been retired on Gem's
+// frontend (jobs.gem.com/<slug> 404s) can still resolve on the GraphQL API
+// with the old postings intact (blaze-ai and arlo confirmed live 2026-07-10,
+// API returns 200 with postings while every one of that board's apply pages
+// 404s), so a board-membership check against the API would report those
+// postings open when they are not reachable at all. The direct page is the
+// only ground truth Gem actually keeps in sync.
+func checkGem(ctx context.Context, fetch Fetcher, e Eligibility) (string, error) {
+	pageURL := "https://jobs.gem.com/" + e.Slug + "/" + e.JobID
+	res, err := fetch(ctx, pageURL)
+	if err != nil || res == nil {
+		return "", err
+	}
+	if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusGone {
+		return "closed", nil
+	}
+	return "open", nil
 }
 
 // Run checks all active jobs and marks closed rows in the repository.
@@ -205,9 +334,16 @@ func Run(ctx context.Context, repo *db.Repository, cfg Config) (Result, error) {
 	if cfg.Delay == 0 {
 		cfg.Delay = defaultDelay
 	}
+	if cfg.Log == nil {
+		cfg.Log = slog.Default()
+	}
 	fetch := cfg.Fetch
 	if fetch == nil {
 		fetch = defaultFetcher(nil)
+	}
+	cache := cfg.Cache
+	if cache == nil {
+		cache = NewCache()
 	}
 	jobs, err := repo.CloseCheckJobs()
 	if err != nil {
@@ -215,7 +351,6 @@ func Run(ctx context.Context, repo *db.Repository, cfg Config) (Result, error) {
 	}
 
 	var result Result
-	ashbyCache := map[string]map[string]bool{}
 	for start := 0; start < len(jobs); start += cfg.Concurrency {
 		end := start + cfg.Concurrency
 		if end > len(jobs) {
@@ -227,15 +362,12 @@ func Run(ctx context.Context, repo *db.Repository, cfg Config) (Result, error) {
 			err    error
 		}
 		checkedRows := make([]checked, len(batch))
-		var mu sync.Mutex
 		var wg sync.WaitGroup
 		for i, job := range batch {
 			wg.Add(1)
 			go func(i int, job db.CloseCheckJob) {
 				defer wg.Done()
-				mu.Lock()
-				status, err := CheckJob(ctx, fetch, job, ashbyCache)
-				mu.Unlock()
+				status, err := CheckJob(ctx, fetch, job, cache)
 				checkedRows[i] = checked{status: status, err: err}
 			}(i, job)
 		}
@@ -254,8 +386,12 @@ func Run(ctx context.Context, repo *db.Repository, cfg Config) (Result, error) {
 			case "":
 				result.Skipped++
 			case "closed":
+				// Same reasoning as the probe-failure branch above: one failed
+				// write must not discard the rest of the pass.
 				if err := repo.SetPipelineStage(batch[i].ID, "closed"); err != nil {
-					return Result{}, err
+					cfg.Log.Warn("closed check: marking job closed failed", "job", batch[i].ID, "error", err)
+					result.Errored++
+					continue
 				}
 				result.Closed++
 				result.Checked++

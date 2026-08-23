@@ -1,0 +1,52 @@
+{
+  "list": {
+    "data": {
+      "oatsExternalJobPostings": {
+        "jobPostings": [
+          {
+            "extId": "e1",
+            "title": "Platform Engineer",
+            "locations": [{ "name": "Remote" }]
+          },
+          {
+            "extId": "e2",
+            "title": "Product Designer",
+            "locations": [{ "name": "New York, NY" }]
+          },
+          {
+            "extId": "e3",
+            "title": "Backend Engineer",
+            "locations": [{ "name": "New York, NY" }, { "name": "Austin, TX" }]
+          }
+        ]
+      },
+      "jobBoardExternal": { "teamDisplayName": "Acme" }
+    }
+  },
+  "details": {
+    "e1": {
+      "data": {
+        "oatsExternalJobPosting": {
+          "descriptionHtml": "<div>Build and scale platforms.</div>",
+          "compensationHtml": "<h2>Compensation</h2><div>$180,000 - $220,000</div>"
+        }
+      }
+    },
+    "e2": {
+      "data": {
+        "oatsExternalJobPosting": {
+          "descriptionHtml": "<div>Design product surfaces.</div>",
+          "compensationHtml": null
+        }
+      }
+    },
+    "e3": {
+      "data": {
+        "oatsExternalJobPosting": {
+          "descriptionHtml": "<div>Own backend services.</div>",
+          "compensationHtml": null
+        }
+      }
+    }
+  }
+}

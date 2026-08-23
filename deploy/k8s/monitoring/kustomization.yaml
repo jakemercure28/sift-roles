@@ -1,0 +1,34 @@
+# Cluster monitoring wiring. Namespace comes from the Argo Application
+# destination; see deploy/argocd/apps/monitoring-config.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - compose-prometheus.yaml
+  - compose-loki.yaml
+  # Pins the k8s Grafana admin password so it stops rotating on every helm
+  # redeploy (persistence is off + no adminPassword pinned = the chart
+  # regenerates a random one each sync). Consumed via grafana.admin.existingSecret
+  # in deploy/argocd/apps/monitoring.yaml.
+  - grafana-admin-sealedsecret.yaml
+
+# Alloy's config, kept as a real .alloy file so it can be linted directly
+# (`alloy fmt` / `alloy validate`) instead of hiding inside a YAML string.
+# The Alloy chart is pointed at this ConfigMap by name rather than given the
+# content inline, because the chart runs `configMap.content` through Helm's
+# `tpl` and the level-mapping stage's Go template syntax breaks it. See
+# deploy/argocd/apps/alloy.yaml.
+configMapGenerator:
+  - name: alloy-config
+    files:
+      - config.alloy=alloy-config.alloy
+
+generatorOptions:
+  # The chart references this ConfigMap by a static name, so the usual content
+  # hash suffix must not be appended. Trade-off: editing the config does NOT
+  # roll the DaemonSet by itself. Alloy watches its config file and reloads in
+  # place, so that is fine; if a change ever needs a hard restart, delete the
+  # pods (Argo recreates them).
+  disableNameSuffixHash: true

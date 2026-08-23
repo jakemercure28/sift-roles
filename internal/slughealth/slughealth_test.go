@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -145,5 +146,101 @@ func TestRunWritesDashboardSummary(t *testing.T) {
 	}
 	if written.Timestamp != "2026-05-07T12:00:00.000Z" || written.ByATS["Greenhouse"].OK != 1 {
 		t.Fatalf("written = %+v", written)
+	}
+}
+
+func TestRunBatchBoundedConcurrency(t *testing.T) {
+	const items = 12
+	const workers = 4
+	var inFlight, peak atomic.Int64
+	var fakeItems []checkItem
+	for i := 0; i < items; i++ {
+		fakeItems = append(fakeItems, checkItem{label: "slug", fn: func(context.Context, Config, any) checkResult {
+			n := inFlight.Add(1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+			inFlight.Add(-1)
+			return checkResult{Result: "ok"}
+		}})
+	}
+
+	counts, issues, err := runBatch(context.Background(), Config{Concurrency: workers, Delay: -1}, batch{name: "Greenhouse", items: fakeItems})
+	if err != nil {
+		t.Fatalf("runBatch: %v", err)
+	}
+	if counts.OK != items {
+		t.Fatalf("OK = %d, want %d", counts.OK, items)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %d, want 0", len(issues))
+	}
+	if p := peak.Load(); p < 2 {
+		t.Fatalf("peak in-flight = %d, want concurrent execution (>= 2)", p)
+	}
+	if p := peak.Load(); p > workers {
+		t.Fatalf("peak in-flight = %d, want <= %d workers", p, workers)
+	}
+}
+
+func TestRunBatchStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int64
+	var fakeItems []checkItem
+	for i := 0; i < 50; i++ {
+		fakeItems = append(fakeItems, checkItem{label: "slug", fn: func(context.Context, Config, any) checkResult {
+			if calls.Add(1) == 2 {
+				cancel()
+			}
+			// Give cancel() time to land before this worker's next loop check;
+			// instantaneous items can drain the whole batch before the other
+			// worker's cancel call even returns.
+			time.Sleep(5 * time.Millisecond)
+			return checkResult{Result: "ok"}
+		}})
+	}
+
+	_, _, err := runBatch(ctx, Config{Concurrency: 2, Delay: -1}, batch{name: "Greenhouse", items: fakeItems})
+	if err == nil {
+		t.Fatal("runBatch after cancel: want error, got nil")
+	}
+	if got := calls.Load(); got > 10 {
+		t.Fatalf("calls = %d, want early stop", got)
+	}
+}
+
+// TestOversizedBoardBodyClassifiesOK pins the fix for big live boards (e.g.
+// OpenAI's >11MB Ashby posting JSON): a 2xx body larger than maxBodyBytes must
+// classify ok instead of failing the JSON parse of a truncated read.
+func TestOversizedBoardBodyClassifiesOK(t *testing.T) {
+	old := maxBodyBytes
+	maxBodyBytes = 1024
+	t.Cleanup(func() { maxBodyBytes = old })
+
+	body := `{"jobs":[` + strings.TrimRight(strings.Repeat(`{"id":"x"},`, 500), ",") + `]}`
+	newClient := func(status int) *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    r,
+			}, nil
+		})}
+	}
+
+	got := checkAshby(context.Background(), Config{HTTPClient: newClient(http.StatusOK)}, "bigco")
+	if got.Result != "ok" {
+		t.Fatalf("oversized 2xx: Result = %q (note %q), want ok", got.Result, got.Note)
+	}
+
+	got = checkAshby(context.Background(), Config{HTTPClient: newClient(http.StatusNotFound)}, "bigco")
+	if got.Result != "broken" {
+		t.Fatalf("oversized 404: Result = %q, want broken", got.Result)
 	}
 }

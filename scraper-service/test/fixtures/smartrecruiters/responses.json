@@ -1,0 +1,49 @@
+{
+  "list": {
+    "totalFound": 3,
+    "content": [
+      {
+        "id": "s1",
+        "name": "Platform Engineer",
+        "location": { "city": "Remote", "remote": true, "fullLocation": "Remote" },
+        "company": { "name": "Acme" }
+      },
+      {
+        "id": "s2",
+        "name": "Product Designer",
+        "location": { "city": "New York", "country": "us", "fullLocation": "New York, NY, USA" },
+        "company": { "name": "Acme" }
+      },
+      {
+        "id": "s3",
+        "name": "Backend Engineer",
+        "location": { "city": "Austin", "country": "us", "fullLocation": "Austin, TX, USA" },
+        "company": { "name": "Acme" }
+      }
+    ]
+  },
+  "details": {
+    "s1": {
+      "jobAd": {
+        "sections": {
+          "jobDescription": { "text": "<div>Build and scale platforms.</div>" }
+        }
+      },
+      "compensation": { "min": 180000, "max": 220000, "currency": "USD", "period": "YEARLY" }
+    },
+    "s2": {
+      "jobAd": {
+        "sections": {
+          "jobDescription": { "text": "<div>Design product surfaces.</div>" }
+        }
+      }
+    },
+    "s3": {
+      "jobAd": {
+        "sections": {
+          "jobDescription": { "text": "<div>Own backend services.</div>" }
+        }
+      }
+    }
+  }
+}

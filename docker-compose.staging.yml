@@ -1,0 +1,23 @@
+# Staging overrides, layered on docker-compose.yml by scripts/deploy.sh when
+# deploying the `staging` env (dev branch).
+#
+# Goal: a faithful copy of prod that does NOT burn Gemini quota or scrape on
+# every deploy. Staging points at its own Supabase project and (ideally) its own
+# Gemini key via /srv/jsa/staging/.env — these toggles just keep deploys quiet.
+# Manual "Scrape now" / scoring from the dashboard still work for testing.
+services:
+  go-backend:
+    environment:
+      # Don't auto-scrape/score on boot; a deploy shouldn't kick off a Gemini run.
+      SCRAPE_ON_START: '0'
+      SCORE_ON_START: '0'
+      # Slow the cron way down on staging; it's for verifying behaviour, not
+      # keeping a live job feed warm.
+      SCRAPE_SCHEDULE: '0 9 * * *'
+      # Staging shares the same Supabase org egress quota as prod, so quiet the
+      # per-tenant fan-out loops hard: metrics gauges hourly, Market Research warm
+      # effectively once per boot (24h), and a tighter all-time window. The body
+      # still rebuilds lazily on view when someone is actually testing it.
+      METRICS_REFRESH_INTERVAL_MS: '3600000'
+      MARKET_WARM_INTERVAL_MS: '86400000'
+      MARKET_ALLTIME_WINDOW_DAYS: '90'

@@ -1,0 +1,14 @@
+# Single RWO volume shared by both pods (they run on the one node; the
+# scraper writes profile data the backend reads). Backed by the local-path
+# provisioner under /srv/jsa/k3s-storage. Sized generously: today's data/
+# is under 3M per env, but tailored resumes and caches grow.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jsa-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

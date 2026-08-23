@@ -19,3 +19,7 @@ internal/dashboard/modals.html
 internal/dashboard/testdata/
 internal/dashboard/report-problem-head.html
 internal/dashboard/report-problem-tail.html
+
+# Static marketing site: hand-authored HTML/CSS deployed verbatim to Cloudflare
+# Pages (inline data-URI SVGs etc). Not part of the app's lint surface.
+marketing/

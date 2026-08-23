@@ -1,0 +1,39 @@
+# ClusterIP only. Alertmanager reaches it in-cluster and nothing outside the
+# cluster should be able to hand this agent an alert to act on.
+apiVersion: v1
+kind: Service
+metadata:
+  name: opsagent
+  namespace: monitoring
+  labels:
+    app: opsagent
+spec:
+  selector:
+    app: opsagent
+  ports:
+    - name: http
+      port: 8091
+      targetPort: http
+---
+# The agent emits jsa_opsagent_* series on the same port as the webhook. env is
+# set to a literal here rather than derived from the namespace: this workload
+# lives in monitoring and watches both envs, so a namespace-derived env label
+# would be wrong (it would read "monitoring").
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: opsagent
+  namespace: monitoring
+  labels:
+    app: opsagent
+spec:
+  selector:
+    matchLabels:
+      app: opsagent
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      relabelings:
+        - targetLabel: env
+          replacement: cluster

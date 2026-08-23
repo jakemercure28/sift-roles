@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -40,8 +41,18 @@ const geminiURLTemplate = "https://generativelanguage.googleapis.com/v1beta/mode
 const (
 	maxRetries            = 5
 	defaultMaxOutputToken = 600
-	retryBaseDelay        = 5 * time.Second
-	delay429              = 30 * time.Second
+	// scoreMaxOutputToken is tighter than the default: a low score now answers
+	// with one short sentence (~40 tokens) and a high score with 2-4 sentences
+	// (~200), so 400 leaves headroom without paying for prose nobody reads.
+	scoreMaxOutputToken = 400
+	retryBaseDelay      = 5 * time.Second
+	delay429            = 30 * time.Second
+	// maxRateRetryWait caps how long a single 429 retry will block a scoring
+	// worker on Google's requested RetryDelay. Free-tier token-rate (TPM) windows
+	// reset within a minute, so a delay under this is worth waiting out; anything
+	// longer is a deeper hole not worth holding a worker for, so we abandon the
+	// call and let the next pass retry it after the quota gate re-checks.
+	maxRateRetryWait = 75 * time.Second
 )
 
 // UsageRecorder records a Gemini call against the daily api_usage tally. The
@@ -73,9 +84,28 @@ type Client struct {
 	usage   UsageRecorder
 	log     *slog.Logger
 
+	// overflowKey is an optional second (billed) API key. The primary key stays
+	// the default so its free-tier daily quota is always spent first; when the
+	// primary answers 429 the client fails over to this key for overflowCooldown
+	// (see keyCooldowns). Empty disables failover. Overflow calls are tallied in
+	// the same usage buckets as primary calls: the app-side daily limits are the
+	// total budget across both keys.
+	overflowKey     string
+	overflowLimiter *sharedLimiter
+	rateDelay       time.Duration // kept so WithOverflowKey can build the overflow limiter
+
+	// preferOverflow routes calls to the overflow key without waiting for a 429
+	// on the primary. Latency-sensitive paths (the onboarding burst) set it when
+	// the primary key is known to be stalled, so a signup is never paced behind
+	// a dry free-tier key.
+	preferOverflow bool
+
 	// tenant scopes this client's calls in the shared limiter's round-robin so
 	// one tenant's bulk run can't starve another. Empty means the default bucket.
 	tenant string
+	// scoreThinking is the thinkingLevel sent on the scoring calls (see
+	// WithThinkingLevel). Empty omits the field so the model default applies.
+	scoreThinking string
 	// hostKey is true when apiKey is the shared host key, so successful calls are
 	// also tallied against the global host quota.
 	hostKey bool
@@ -112,9 +142,37 @@ func NewClientForModel(apiKey, model string, rateDelay time.Duration, usage Usag
 		limiter:   limiterFor(apiKey, model, rateDelay),
 		usage:     usage,
 		log:       log,
+		rateDelay: rateDelay,
 		retry429:  delay429,
 		retryBase: retryBaseDelay,
 	}
+}
+
+// WithOverflowKey configures an optional billed overflow key: when the primary
+// key answers 429 (its free-tier quota is exhausted), calls fail over to this
+// key for overflowCooldown before the primary is probed again. The overflow key
+// gets its own pacing limiter so failover doesn't inherit the primary's queue.
+// rateDelay paces the overflow limiter; zero or negative falls back to the
+// primary key's delay. A billed key has paid-tier RPM headroom, so callers may
+// pace it faster than the free key. Empty key disables failover. Returns the
+// client for chaining.
+func (c *Client) WithOverflowKey(key string, rateDelay time.Duration) *Client {
+	c.overflowKey = key
+	if key != "" {
+		if rateDelay <= 0 {
+			rateDelay = c.rateDelay
+		}
+		c.overflowLimiter = limiterFor(key, c.model, rateDelay)
+	}
+	return c
+}
+
+// WithPreferOverflow makes this client use the overflow key for every call
+// instead of only during a post-429 cooldown. A no-op when no overflow key is
+// configured. Returns the client for chaining.
+func (c *Client) WithPreferOverflow(prefer bool) *Client {
+	c.preferOverflow = prefer
+	return c
 }
 
 // WithTenant scopes this client's calls to a tenant in the shared limiter's
@@ -130,6 +188,25 @@ func (c *Client) WithTenant(tenant string) *Client {
 func (c *Client) WithHostKey(host bool) *Client {
 	c.hostKey = host
 	return c
+}
+
+// WithThinkingLevel sets the thinkingConfig.thinkingLevel sent on the scoring
+// calls (SCORING_THINKING_LEVEL). Empty (the default) omits the field
+// entirely: flash-lite does not think unless asked, and any level (even
+// "low") enables thinking, billing thought tokens as output and eating the
+// maxOutputTokens budget, which truncates the visible reasoning. Non-scoring
+// operations are unaffected. Returns the client for chaining.
+func (c *Client) WithThinkingLevel(level string) *Client {
+	c.scoreThinking = strings.TrimSpace(level)
+	return c
+}
+
+// scoreThinkingConfig is the thinkingConfig for scoring calls; nil when unset.
+func (c *Client) scoreThinkingConfig() *thinkingConfig {
+	if c.scoreThinking == "" {
+		return nil
+	}
+	return &thinkingConfig{ThinkingLevel: c.scoreThinking}
 }
 
 type geminiRequest struct {
@@ -156,6 +233,15 @@ type generationConfig struct {
 	// instead of free text; single-job scoring leaves them empty.
 	ResponseMimeType string          `json:"responseMimeType,omitempty"`
 	ResponseSchema   json.RawMessage `json:"responseSchema,omitempty"`
+	// ThinkingConfig sets the model's internal reasoning spend. Omitted by
+	// default: flash-lite does not think unless asked, and any set level
+	// enables thinking whose thought tokens are billed as output and count
+	// against MaxOutputTokens (see WithThinkingLevel).
+	ThinkingConfig *thinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+type thinkingConfig struct {
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 // ScoreTemperature pins both scoring paths to deterministic output. Scoring with
@@ -174,6 +260,14 @@ type geminiResponse struct {
 	UsageMetadata geminiUsageMetadata `json:"usageMetadata"`
 	Error         struct {
 		Message string `json:"message"`
+		// Details carries google.rpc.RetryInfo on a 429, whose RetryDelay ("27s")
+		// is how long the limit actually needs. Honoring it is what lets a
+		// per-minute token-rate 429 wait the right sub-minute window and then
+		// succeed, instead of blindly sleeping the fixed delay429.
+		Details []struct {
+			Type       string `json:"@type"`
+			RetryDelay string `json:"retryDelay"`
+		} `json:"details"`
 	} `json:"error"`
 }
 
@@ -181,7 +275,13 @@ type geminiUsageMetadata struct {
 	PromptTokenCount        int `json:"promptTokenCount"`
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
 	CandidatesTokenCount    int `json:"candidatesTokenCount"`
-	TotalTokenCount         int `json:"totalTokenCount"`
+	// ThoughtsTokenCount is the model's internal reasoning spend. It is billed
+	// as output and included in TotalTokenCount but NOT in
+	// CandidatesTokenCount, so leaving it unparsed hides that spend entirely
+	// (measured ~380 thought tokens/job when a thinking level was set on
+	// scoring; zero with the field omitted).
+	ThoughtsTokenCount int `json:"thoughtsTokenCount"`
+	TotalTokenCount    int `json:"totalTokenCount"`
 }
 
 // CallGemini sends a prompt and returns the model's text, pacing and retrying
@@ -204,6 +304,7 @@ func (c *Client) CallGeminiScore(ctx context.Context, prompt string, maxTokens i
 	return c.generate(ctx, "score_single", prompt, generationConfig{
 		MaxOutputTokens: maxTokens,
 		Temperature:     tempPtr(ScoreTemperature),
+		ThinkingConfig:  c.scoreThinkingConfig(),
 	})
 }
 
@@ -220,6 +321,25 @@ func (c *Client) CallGeminiJSON(ctx context.Context, prompt string, maxTokens in
 		Temperature:      tempPtr(ScoreTemperature),
 		ResponseMimeType: "application/json",
 		ResponseSchema:   schema,
+		ThinkingConfig:   c.scoreThinkingConfig(),
+	})
+}
+
+// CallGeminiExtract is extract-once's entry point: structured output like
+// CallGeminiJSON but labeled with its own operation for metrics, and pinned to
+// temperature 0 since fact extraction must be reproducible. Usage accounting is
+// deliberately identical to scoring (same model key, tenant + host ledgers):
+// extraction spends the same provider quota scoring does, so it must count
+// against the same real-quota buckets.
+func (c *Client) CallGeminiExtract(ctx context.Context, prompt string, maxTokens int, schema json.RawMessage) (string, error) {
+	if maxTokens <= 0 {
+		maxTokens = defaultMaxOutputToken
+	}
+	return c.generate(ctx, "extract", prompt, generationConfig{
+		MaxOutputTokens:  maxTokens,
+		Temperature:      tempPtr(ScoreTemperature),
+		ResponseMimeType: "application/json",
+		ResponseSchema:   schema,
 	})
 }
 
@@ -231,23 +351,30 @@ func (c *Client) generate(ctx context.Context, operation, prompt string, gc gene
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if err := c.limiter.acquire(ctx, c.tenant); err != nil {
+		key, limiter := c.pickKey()
+		if err := limiter.acquire(ctx, c.tenant); err != nil {
 			return "", err
+		}
+		keyLabel := "primary"
+		if key != c.apiKey {
+			keyLabel = "overflow"
 		}
 
 		start := time.Now()
-		text, usage, status, err := c.doRequest(ctx, prompt, gc)
+		text, usage, status, retryAfter, err := c.doRequest(ctx, key, prompt, gc)
 		result := "ok"
 		if err != nil {
 			result = "error"
 		}
-		metrics.ObserveGeminiRequest(operation, result, statusLabel(status), time.Since(start))
+		metrics.ObserveGeminiRequest(operation, result, statusLabel(status), keyLabel, time.Since(start))
 		if err == nil {
 			metrics.ObserveGeminiTokens(
 				operation,
+				keyLabel,
 				usage.PromptTokenCount,
 				usage.CachedContentTokenCount,
 				usage.CandidatesTokenCount,
+				usage.ThoughtsTokenCount,
 				usage.TotalTokenCount,
 			)
 			if c.usage != nil {
@@ -284,6 +411,17 @@ func (c *Client) generate(ctx context.Context, operation, prompt string, gc gene
 		}
 		lastErr = err
 
+		// A 429 on the primary key with an overflow key configured means the free
+		// tier is exhausted (pacing keeps us under its RPM limit, so 429s are quota,
+		// not rate). Fail over immediately rather than burning the 30s backoff on a
+		// key that stays dry until the daily reset.
+		if status == http.StatusTooManyRequests && key == c.apiKey && c.overflowKey != "" && c.overflowKey != c.apiKey {
+			startCooldown(keyID(c.apiKey, c.model))
+			c.log.Warn("gemini primary key 429; failing over to overflow key",
+				"cooldown", overflowCooldown.String(), "attempt", attempt+1)
+			continue
+		}
+
 		retryable := status == http.StatusTooManyRequests || status >= 500
 		if !retryable || attempt == maxRetries {
 			break
@@ -291,7 +429,30 @@ func (c *Client) generate(ctx context.Context, operation, prompt string, gc gene
 
 		delay := c.retryBase * (1 << attempt)
 		if status == http.StatusTooManyRequests {
-			delay = c.retry429
+			// The daily request cap will not reset within any backoff window, so
+			// retrying it just burns the ladder and still fails; stop now and let
+			// the job fall to the next pass, where the quota gate holds it back.
+			if isDailyRequestQuota(err) {
+				c.log.Warn("gemini daily request quota exhausted; abandoning retries",
+					"attempt", attempt+1)
+				break
+			}
+			// A retry delay past the cap is a per-minute limit too deep to hold a
+			// scoring worker for; give up and let the next pass retry the job.
+			if retryAfter > maxRateRetryWait {
+				c.log.Warn("gemini 429 retry delay exceeds cap; abandoning call",
+					"retry_after", retryAfter.String(), "cap", maxRateRetryWait.String(), "attempt", attempt+1)
+				break
+			}
+			// Otherwise honor Google's own RetryDelay so we wait exactly as long as
+			// the token/rate window needs and then succeed, rather than the fixed
+			// delay429. Jitter spreads a concurrent burst that all 429'd together
+			// so they don't retry in lockstep and re-trip the same limit.
+			if retryAfter > 0 {
+				delay = retryAfter + retryJitter()
+			} else {
+				delay = c.retry429
+			}
 		}
 		c.log.Warn("gemini retry", "status", status, "delay", delay.String(), "attempt", attempt+1)
 		select {
@@ -303,6 +464,50 @@ func (c *Client) generate(ctx context.Context, operation, prompt string, gc gene
 	return "", lastErr
 }
 
+// pickKey chooses which API key (and its limiter) the next request uses: the
+// overflow key while the primary is cooling down after a 429 (or when the
+// client prefers overflow outright), the primary otherwise. The cooldown is
+// process-global per (primary key, model), so every tenant's client fails over
+// together instead of each rediscovering the 429.
+func (c *Client) pickKey() (string, *sharedLimiter) {
+	if c.overflowKey != "" && (c.preferOverflow || inCooldown(keyID(c.apiKey, c.model))) {
+		return c.overflowKey, c.overflowLimiter
+	}
+	return c.apiKey, c.limiter
+}
+
+// overflowCooldown is how long a 429'd primary key sits out before being probed
+// again. Free-tier daily quotas reset at midnight PT; a fixed cooldown keeps the
+// code timezone-free at the cost of one probe call every cooldown period.
+const overflowCooldown = 30 * time.Minute
+
+// keyCooldowns marks primary keys that recently answered 429, keyed by
+// keyID(apiKey, model) so the plaintext key isn't a map key.
+var (
+	cooldownMu   sync.Mutex
+	keyCooldowns = map[string]time.Time{}
+)
+
+func startCooldown(id string) {
+	cooldownMu.Lock()
+	keyCooldowns[id] = time.Now().Add(overflowCooldown)
+	cooldownMu.Unlock()
+}
+
+func inCooldown(id string) bool {
+	cooldownMu.Lock()
+	defer cooldownMu.Unlock()
+	until, ok := keyCooldowns[id]
+	if !ok {
+		return false
+	}
+	if time.Now().After(until) {
+		delete(keyCooldowns, id)
+		return false
+	}
+	return true
+}
+
 func statusLabel(status int) string {
 	if status == 0 {
 		return "transport"
@@ -310,42 +515,44 @@ func statusLabel(status int) string {
 	return fmt.Sprintf("%d", status)
 }
 
-// doRequest performs a single Gemini call. It returns the parsed text on success,
-// or the HTTP status (0 on transport error) and an error otherwise.
-func (c *Client) doRequest(ctx context.Context, prompt string, gc generationConfig) (string, geminiUsageMetadata, int, error) {
+// doRequest performs a single Gemini call on the given API key. It returns the
+// parsed text on success, or the HTTP status (0 on transport error) and an error
+// otherwise. On a 429 the returned duration is Google's requested RetryDelay
+// (0 when absent), so the caller can wait exactly as long as the limit needs.
+func (c *Client) doRequest(ctx context.Context, apiKey, prompt string, gc generationConfig) (string, geminiUsageMetadata, int, time.Duration, error) {
 	body, err := json.Marshal(geminiRequest{
 		Contents:         []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
 		GenerationConfig: gc,
 	})
 	if err != nil {
-		return "", geminiUsageMetadata{}, 0, err
+		return "", geminiUsageMetadata{}, 0, 0, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
-		return "", geminiUsageMetadata{}, 0, err
+		return "", geminiUsageMetadata{}, 0, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", c.apiKey)
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", geminiUsageMetadata{}, 0, err
+		return "", geminiUsageMetadata{}, 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", geminiUsageMetadata{}, resp.StatusCode, err
+		return "", geminiUsageMetadata{}, resp.StatusCode, 0, err
 	}
 
 	var parsed geminiResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		// A non-JSON body on an error status still needs to surface the status.
 		if resp.StatusCode != http.StatusOK {
-			return "", geminiUsageMetadata{}, resp.StatusCode, fmt.Errorf("gemini error %d", resp.StatusCode)
+			return "", geminiUsageMetadata{}, resp.StatusCode, 0, fmt.Errorf("gemini error %d", resp.StatusCode)
 		}
-		return "", geminiUsageMetadata{}, resp.StatusCode, err
+		return "", geminiUsageMetadata{}, resp.StatusCode, 0, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -353,14 +560,49 @@ func (c *Client) doRequest(ctx context.Context, prompt string, gc generationConf
 		if msg == "" {
 			msg = fmt.Sprintf("gemini error %d", resp.StatusCode)
 		}
-		return "", geminiUsageMetadata{}, resp.StatusCode, errors.New(msg)
+		return "", geminiUsageMetadata{}, resp.StatusCode, retryDelayFromDetails(parsed.Error.Details), errors.New(msg)
 	}
 
 	var text string
 	if len(parsed.Candidates) > 0 && len(parsed.Candidates[0].Content.Parts) > 0 {
 		text = parsed.Candidates[0].Content.Parts[0].Text
 	}
-	return strings.TrimSpace(text), parsed.UsageMetadata, resp.StatusCode, nil
+	return strings.TrimSpace(text), parsed.UsageMetadata, resp.StatusCode, 0, nil
+}
+
+// retryDelayFromDetails pulls the RetryInfo.retryDelay ("27s", "1.5s") out of a
+// Gemini error's details, returning 0 when no parseable RetryInfo is present.
+func retryDelayFromDetails(details []struct {
+	Type       string `json:"@type"`
+	RetryDelay string `json:"retryDelay"`
+}) time.Duration {
+	for _, d := range details {
+		if !strings.Contains(d.Type, "RetryInfo") || d.RetryDelay == "" {
+			continue
+		}
+		if dur, err := time.ParseDuration(d.RetryDelay); err == nil && dur > 0 {
+			return dur
+		}
+	}
+	return 0
+}
+
+// retryJitter returns a small random padding added to an honored RetryDelay. It
+// doubles as a boundary buffer (the token-rate window edge is approximate, so a
+// bare RetryDelay can still land a hair early) and de-synchronizes a concurrent
+// burst that all 429'd at once, so the calls don't retry in lockstep and re-trip
+// the same per-minute limit together.
+func retryJitter() time.Duration {
+	return time.Duration(rand.N(3000)) * time.Millisecond
+}
+
+// isDailyRequestQuota reports whether a 429 message is the per-day request cap
+// (free_tier_requests) rather than a per-minute token/rate limit. Google names
+// the exhausted metric in the message, so the two 429 shapes are distinguishable
+// even though their RetryDelays overlap. The daily cap will not clear within any
+// in-pass backoff, so retrying it is pure waste.
+func isDailyRequestQuota(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "free_tier_requests")
 }
 
 // limiters holds one sharedLimiter per API key, keyed by a hash of the key so the
@@ -381,8 +623,7 @@ func limiterFor(apiKey, model string, delay time.Duration) *sharedLimiter {
 	if apiKey == "" {
 		return &sharedLimiter{delay: 0}
 	}
-	sum := sha256.Sum256([]byte(apiKey + "\x00" + model))
-	id := hex.EncodeToString(sum[:])
+	id := keyID(apiKey, model)
 
 	limiterMu.Lock()
 	defer limiterMu.Unlock()
@@ -392,6 +633,13 @@ func limiterFor(apiKey, model string, delay time.Duration) *sharedLimiter {
 		limiters[id] = l
 	}
 	return l
+}
+
+// keyID hashes (apiKey, model) so plaintext keys never become map keys; it keys
+// both the shared limiters and the overflow cooldowns.
+func keyID(apiKey, model string) string {
+	sum := sha256.Sum256([]byte(apiKey + "\x00" + model))
+	return hex.EncodeToString(sum[:])
 }
 
 // waiter is one pending acquire(); the dispatcher closes ready to grant the slot.

@@ -1,0 +1,114 @@
+# RBAC is the agent's second, independent containment layer. The action gate in
+# internal/opsagent/gate.go decides what the agent is willing to do; this decides
+# what the cluster will let it do. A bug in the gate cannot exceed these rules.
+#
+# The split is deliberate: read everywhere (it has to be able to diagnose a
+# problem wherever it is), write only in the two app namespaces.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opsagent
+  namespace: monitoring
+---
+# Cluster-wide READ. Diagnosis needs to see monitoring, argocd and kube-system
+# too: a Prometheus that is down or an Argo controller that is wedged is often
+# the actual cause of an app-namespace symptom.
+#
+# pods/log is the one entry to weigh carefully: logs can contain anything the
+# app logs, so this is also a data-access grant, not just an ops one.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opsagent-read
+rules:
+  - apiGroups: ['']
+    resources: ['pods', 'pods/log', 'events', 'services', 'endpoints', 'nodes']
+    verbs: ['get', 'list']
+  - apiGroups: ['apps']
+    resources: ['deployments', 'replicasets', 'statefulsets', 'daemonsets']
+    verbs: ['get', 'list']
+  - apiGroups: ['metrics.k8s.io']
+    resources: ['pods', 'nodes']
+    verbs: ['get', 'list']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opsagent-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opsagent-read
+subjects:
+  - kind: ServiceAccount
+    name: opsagent
+    namespace: monitoring
+---
+# Namespaced WRITE. Exactly the verbs the allowlisted actions need and nothing
+# more. Note what is absent and should stay absent:
+#   - no create/delete on deployments (it may restart a workload, not remove one)
+#   - no pods/exec or pods/attach (no shell into a running container)
+#   - no secrets at any verb (the agent never needs to read application secrets)
+#   - no configmaps write (config changes belong in git, via Argo)
+#   - no namespace beyond these two
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsagent-write
+  namespace: jsa-prod
+rules:
+  # rollout_restart stamps the pod template; scale_deployment writes /scale.
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['patch']
+  - apiGroups: ['apps']
+    resources: ['deployments/scale']
+    verbs: ['patch', 'update']
+  # delete_pod: the controller recreates it.
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['delete']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opsagent-write
+  namespace: jsa-prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opsagent-write
+subjects:
+  - kind: ServiceAccount
+    name: opsagent
+    namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsagent-write
+  namespace: jsa-staging
+rules:
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['patch']
+  - apiGroups: ['apps']
+    resources: ['deployments/scale']
+    verbs: ['patch', 'update']
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['delete']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opsagent-write
+  namespace: jsa-staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opsagent-write
+subjects:
+  - kind: ServiceAccount
+    name: opsagent
+    namespace: monitoring

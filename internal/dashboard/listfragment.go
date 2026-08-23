@@ -2,11 +2,13 @@ package dashboard
 
 import (
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"job-search-automation/internal/db"
 	"job-search-automation/internal/metrics"
+	"job-search-automation/internal/scorer"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -41,6 +43,19 @@ type fragmentResponse struct {
 
 // handleDashboardList serves the list-view and report-view fragments natively.
 func (s *Server) handleDashboardList(w http.ResponseWriter, r *http.Request) {
+	// A returning tenant (previous stamp missing or outside the activity
+	// window) gets an immediate scoring kick; must fire before TouchLastSeen
+	// overwrites the stamp it inspects.
+	s.maybeKickScoring()
+	// Record this visit as the tenant's last-seen stamp (best-effort). This
+	// fragment is the authenticated hydration call every dashboard load makes, so
+	// it is the natural engagement chokepoint; the full "/" page is an anonymous
+	// skeleton in hosted mode. A failed stamp only understates activity, so it
+	// must never block the response.
+	if err := s.repo.TouchLastSeen(); err != nil {
+		s.log.Warn("last-seen stamp failed", "error", err)
+	}
+
 	q := r.URL.Query()
 
 	filter := q.Get("filter")
@@ -92,11 +107,12 @@ func (s *Server) buildListFragment(filter, sortKey string, opts SearchOptions) (
 	// concurrently rather than chaining the RTTs. Each goroutine writes its own
 	// variable, so no locking is needed; errgroup returns the first error.
 	var (
-		body       string
-		pagination *Pagination
-		bodyCache  string
-		stats      db.Stats
-		hbPtr      *db.Heartbeat
+		body        string
+		pagination  *Pagination
+		bodyCache   string
+		stats       db.Stats
+		hbPtr       *db.Heartbeat
+		staleScores int
 	)
 	var g errgroup.Group
 	g.Go(func() error {
@@ -119,6 +135,17 @@ func (s *Server) buildListFragment(filter, sortKey string, opts SearchOptions) (
 		metrics.ObserveDashboardFragment(filter, "heartbeat", "none", time.Since(start))
 		return nil
 	})
+	g.Go(func() error {
+		// Stale-resume banner count (best-effort; an error just hides the
+		// banner). Hashing the small resume.md per load is cheap next to the
+		// Postgres round trips this group already makes.
+		if hash := scorer.HashResume(readTextFileSafe(filepath.Join(s.dataDir, "resume.md"))); hash != "" {
+			if n, err := s.repo.CountStaleScores(hash); err == nil {
+				staleScores = n
+			}
+		}
+		return nil
+	})
 	if err := g.Wait(); err != nil {
 		metrics.ObserveDashboardFragment(filter, "total", "error", time.Since(totalStart))
 		return fragmentResponse{}, err
@@ -127,7 +154,7 @@ func (s *Server) buildListFragment(filter, sortKey string, opts SearchOptions) (
 
 	titleHTML := renderDashboardTitle(filter, stats, hbPtr)
 	filtersHTML := renderFilters(filter, sortKey, opts, prefs, metroOrdered)
-	mainHTML := renderDashboardMainContent(body, hbPtr)
+	mainHTML := renderDashboardMainContent(body, hbPtr, staleScores)
 
 	page := 1
 	if pagination != nil {
@@ -154,6 +181,7 @@ func mapJobs(rows []db.ListedJob) []Job {
 			Description: j.Description, Score: j.Score, Reasoning: j.Reasoning,
 			RejectionReason: j.RejectionReason, Status: j.Status, Stage: j.Stage,
 			AppliedAt: j.AppliedAt, RejectedFromStage: j.RejectedFromStage, RejectedAt: j.RejectedAt,
+			ArchiveReason: j.ArchiveReason,
 		}
 	}
 	return out

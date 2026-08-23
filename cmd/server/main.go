@@ -12,8 +12,12 @@
 //	server scrape-once [plats]  run one scrape→insert cycle, then exit
 //	server scrape-test  [plats] probe the worker only (no DB writes)
 //	server score-once           score unscored jobs up to the daily quota, then exit
+//	server rescore              re-score already-scored jobs in place (see the case body)
+//	server batch list           show open + recent Batch API scoring batches
+//	server batch evict <name>   force-close a wedged open batch (jobs return to the pool)
 //	server canonicalize-once    resolve alternate ATS rows into canonical primary rows
 //	server maintain-once        run the DB-maintenance pass (dedup + auto-ghost), then exit
+//	server seed-registry        hunt new ATS boards from Common Crawl into the global registry, then exit
 //	server discover-once        discover and verify new company ATS boards
 //	server add-company ...      verify + record one company's ATS board (/add-company)
 //	server voice-check "text"   voice-check an application answer (/app-questions, /apply)
@@ -26,6 +30,7 @@
 //	server prune-logs-once      delete old dated component logs, then exit
 //	server dashboard            run the dashboard front door (static + proxy to Node)
 //	server queue-worker         run the isolated Go/Asynq queue worker
+//	server opsagent             run the self-healing infra agent (Alertmanager webhook + sweep)
 //	server healthcheck          Docker liveness: DB openable + worker reachable
 package main
 
@@ -33,14 +38,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -56,10 +65,12 @@ import (
 	"job-search-automation/internal/dashboard"
 	"job-search-automation/internal/db"
 	"job-search-automation/internal/discovery"
+	"job-search-automation/internal/jobfilter"
 	"job-search-automation/internal/logging"
 	"job-search-automation/internal/logprune"
 	"job-search-automation/internal/metrics"
 	"job-search-automation/internal/middleware"
+	"job-search-automation/internal/opsagent"
 	"job-search-automation/internal/pipeline"
 	"job-search-automation/internal/rejectionsync"
 	"job-search-automation/internal/scheduler"
@@ -165,11 +176,98 @@ func main() {
 		}
 		logger.Info("score-once complete", "scored_ok", res.ScoredOK, "scored_failed", res.ScoredFailed)
 
+	case "rescore":
+		// Re-score already-scored jobs in place after a rubric or prompt change.
+		// Scores are overwritten, never nulled: a pending row with a NULL score is
+		// what ArchiveStaleUnscored sweeps, and it ages by posted_at/first_seen_at,
+		// so the obvious "null it and run score-once" recovery silently re-buries
+		// anything past the stale window.
+		//
+		// Usage:
+		//   rescore --user <uid> --ids <id,id,...>   re-score an explicit set
+		//   rescore --user <uid> --years-capped      re-score rows a years shortfall buried
+		//   [--max-score N] [--limit N] [--dry-run]
+		fs := flag.NewFlagSet("rescore", flag.ExitOnError)
+		uid := fs.String("user", "", "tenant user id (required)")
+		idList := fs.String("ids", "", "comma-separated job ids to re-score")
+		yearsCapped := fs.Bool("years-capped", false, "re-score rows whose stated mismatch was a years shortfall")
+		maxScore := fs.Int("max-score", cfg.AutoArchiveThreshold, "with --years-capped, only rows at or below this score")
+		limit := fs.Int("limit", 0, "cap how many rows are re-scored (0 = no cap)")
+		dryRun := fs.Bool("dry-run", false, "list the selected rows and exit without scoring")
+		if err := fs.Parse(args); err != nil {
+			os.Exit(2)
+		}
+		var ids []string
+		for _, id := range strings.Split(*idList, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if *uid == "" || (len(ids) == 0 && !*yearsCapped) {
+			fs.Usage()
+			os.Exit(2)
+		}
+
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		base := mustOpenRepo(logger, cfg)
+		defer base.Close()
+		repo := base.ForUser(*uid)
+
+		jobs, err := repo.JobsToRescore(ids, *yearsCapped, *maxScore, *limit)
+		if err != nil {
+			logger.Error("rescore selection failed", "error", err)
+			os.Exit(1)
+		}
+		if len(jobs) == 0 {
+			logger.Info("rescore: nothing selected")
+			return
+		}
+		if *dryRun {
+			for _, j := range jobs {
+				fmt.Printf("%s\t%s\t%s\n", j.ID, j.Company, j.Title)
+			}
+			fmt.Printf("\n%d job(s) selected. Re-run without --dry-run to score them.\n", len(jobs))
+			return
+		}
+
+		res, err := pipeline.RescoreJobs(ctx, repo, buildScorer(cfg, repo, logger), jobs,
+			scoreConfig(cfg, cfg.GeminiAPIKey != "", repo), logger)
+		if err != nil {
+			logger.Error("rescore failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("rescore complete", "selected", len(jobs),
+			"scored_ok", res.ScoredOK, "scored_failed", res.ScoredFailed, "unarchived", res.Unarchived)
+
 	case "maintain-once":
 		// Run the DB-maintenance pass (dedup + auto-ghost) once and exit.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 		repo := mustOpenRepo(logger, cfg)
 		defer repo.Close()
-		runMaintenance(repo, cfg, logger)
+		runMaintenance(ctx, repo, cfg, logger, nil)
+
+	case "seed-registry":
+		// Hunt new ATS board slugs from Common Crawl, verify the live ones, and
+		// upsert them into the global company_registry, then exit. Same work the
+		// monthly cron does; safe to run on demand. Zero Gemini cost.
+		// Usage: seed-registry [numCrawls]   (default 1; a larger count backfills
+		// that many recent monthly crawls to maximize the initial catch).
+		crawls := cfg.RegistrySeedCrawls
+		if len(args) > 0 {
+			if n, err := strconv.Atoi(args[0]); err == nil && n > 0 {
+				crawls = n
+			}
+		}
+		repo := mustOpenRepo(logger, cfg)
+		defer repo.Close()
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if _, err := runRegistrySeed(ctx, repo, logger, crawls); err != nil {
+			logger.Error("seed-registry failed", "error", err)
+			os.Exit(1)
+		}
 
 	case "dedup-once":
 		// Run ONLY the dedup passes (archive re-posts/duplicates/alternates) once
@@ -184,6 +282,78 @@ func main() {
 		}
 		logger.Info("dedup-once complete",
 			"reposts", res.Reposts, "pending", res.Pending, "alternates", res.Alternates, "total", res.Total())
+
+	case "batch":
+		// Admin view of the Batch API scoring ledger.
+		//   batch list          open batches (any age) + everything from the last 7 days
+		//   batch evict <name>  force-close a wedged open batch; members return to the
+		//                       sync pool, and a best-effort Gemini-side cancel runs
+		//                       when the overflow key is configured.
+		sub := ""
+		if len(args) > 0 {
+			sub = args[0]
+		}
+		repo := mustOpenRepo(logger, cfg)
+		defer repo.Close()
+		switch sub {
+		case "list":
+			since := time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+			batches, err := repo.RecentScoreBatches(since)
+			if err != nil {
+				logger.Error("batch list failed", "error", err)
+				os.Exit(1)
+			}
+			if len(batches) == 0 {
+				fmt.Println("No open batches and none created in the last 7 days.")
+				return
+			}
+			fmt.Printf("%-38s %-28s %-10s %5s %8s  %s\n", "USER", "BATCH", "STATE", "JOBS", "AGE", "ERROR")
+			for _, b := range batches {
+				age := "?"
+				if created, err := time.Parse("2006-01-02 15:04:05", b.CreatedAt); err == nil {
+					age = time.Since(created).Truncate(time.Minute).String()
+				}
+				fmt.Printf("%-38s %-28s %-10s %5d %8s  %s\n", b.UserID, b.BatchName, b.State, b.JobCount, age, b.Error)
+			}
+		case "evict":
+			if len(args) < 2 {
+				fmt.Fprintln(os.Stderr, "Usage: batch evict <batch-name>   (see `batch list` for names)")
+				os.Exit(2)
+			}
+			name := args[1]
+			b, found, err := repo.GetScoreBatchByName(name)
+			if err != nil {
+				logger.Error("batch lookup failed", "batch", name, "error", err)
+				os.Exit(1)
+			}
+			if !found {
+				fmt.Fprintf(os.Stderr, "batch evict: no batch named %q\n", name)
+				os.Exit(1)
+			}
+			if b.State != db.ScoreBatchSubmitted {
+				fmt.Fprintf(os.Stderr, "batch evict: %s is already terminal (%s), nothing to do\n", name, b.State)
+				os.Exit(1)
+			}
+			// CloseScoreBatch is tenant-scoped; re-scope to the batch's owner.
+			if err := repo.ForUser(b.UserID).CloseScoreBatch(name, db.ScoreBatchCancelled, "evicted via CLI"); err != nil {
+				logger.Error("batch evict failed", "batch", name, "error", err)
+				os.Exit(1)
+			}
+			fmt.Printf("Evicted %s (user %s, %d jobs returned to the scoring pool).\n", name, b.UserID, b.JobCount)
+			if cfg.GeminiOverflowAPIKey != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				bc := scorer.NewBatchClient(cfg.GeminiOverflowAPIKey, logger)
+				if err := bc.CancelScoreBatch(ctx, name); err != nil {
+					logger.Warn("gemini-side cancel failed (ledger row is closed regardless)", "batch", name, "error", err)
+				} else {
+					fmt.Println("Gemini-side cancel requested.")
+				}
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: batch list | batch evict <batch-name>")
+			os.Exit(2)
+		}
 
 	case "delete-tenant":
 		// Permanently delete one tenant's data: every user_id-scoped DB row plus
@@ -296,7 +466,7 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		defer repo.Close()
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		if _, err := runClosedCheck(ctx, repo, logger); err != nil {
+		if _, err := runClosedCheck(ctx, repo, logger, nil); err != nil {
 			logger.Error("closed-check-once failed", "error", err)
 			os.Exit(1)
 		}
@@ -378,6 +548,7 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		srv.SetAuth(buildDashboardAuth(ctx, cfg, logger), cfg.SupabaseURL, cfg.SupabaseAnonKey)
 		srv.SetAuthAdminDSN(cfg.DatabaseURL)
 		srv.SetRateLimit(cfg.RateLimitPerMinute, cfg.RateLimitBurst)
+		srv.SetMarketAllTimeWindowDays(cfg.MarketAllTimeWindowDays)
 		// Fresh config per run so Sync now picks up credentials saved in the
 		// Settings modal without a restart.
 		srv.SetRejectionSyncRunner(func(runCtx context.Context) (rejectionsync.Summary, error) {
@@ -396,13 +567,55 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 			os.Exit(1)
 		}
 
+	case "opsagent":
+		// Self-healing infra agent. Runs as its own workload in the monitoring
+		// namespace: it receives Alertmanager webhooks, investigates with
+		// read-only cluster/Prometheus/Argo/GitHub tools, and may apply a small
+		// allowlisted set of remediations. It shares this binary (and therefore
+		// this image) rather than shipping its own, but it opens no database and
+		// touches nothing in the pipeline.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		if err := runOpsAgent(ctx, logger); err != nil {
+			logger.Error("opsagent error", "error", err)
+			os.Exit(1)
+		}
+
 	default:
+		// Only a BARE invocation runs the long-lived server. An unrecognized
+		// subcommand used to land here and boot a second full app instance,
+		// schedulers and all, inside whatever container it was exec'd into: the
+		// port binds fail loudly but the cron schedulers still register, so a
+		// typo against prod silently arms a duplicate set of scheduled writes.
+		// Fail closed instead.
+		if cmd != "" {
+			fmt.Fprintf(os.Stderr, "unknown subcommand %q\nRun with no arguments to start the server; see the usage comment at the top of this file for the subcommand list.\n", cmd)
+			os.Exit(2)
+		}
 		repo := mustOpenRepo(logger, cfg)
 		defer repo.Close()
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+		// Repair half-finished onboarding before the first cron fires, so a tenant
+		// stranded by an abandoned wizard is serviced from this boot rather than
+		// waiting for the next fan-out.
+		repairStalledProfiles(repo, cfg.DataDir, logger)
 		sched := scheduler.New(client, repo, cfg.DataDir, cfg.ScrapeSchedule, nil, logger)
-		sched.SetGlobalJobSeedLimit(cfg.GlobalJobSeedLimit)
+		sched.SetGlobalJobSeedLimit(cfg.GlobalJobSeedLimit, cfg.GlobalJobSeedMaxAgeDays)
+		if cfg.GlobalScrapeEnabled {
+			// Global-first cron: scrape the cross-tenant board union once per
+			// cycle and feed tenants by distribution instead of N board scrapes.
+			sched.EnableGlobalScrape(scheduler.GlobalScrapeConfig{
+				BoardBatch:           cfg.GlobalScrapeBoardBatch,
+				DistributeLimit:      cfg.GlobalDistributeLimit,
+				InitialMaxAgeDays:    cfg.GlobalJobSeedMaxAgeDays,
+				DistributeGraceHours: cfg.GlobalDistributeGraceHours,
+				CloseGraceHours:      cfg.GlobalCloseGraceHours,
+				CloseVerify:          cfg.GlobalCloseVerify,
+				WorkdayRegistryBatch: cfg.GlobalWorkdayRegistryBatch,
+				DistributeReserve:    cfg.GlobalDistributeReserve,
+			})
+		}
 		// Bootstrap discovery for the user-triggered scrape path (setup wizard /
 		// "Scrape now"). A freshly onboarded tenant has empty company lists and so
 		// owns no job rows, which keeps it out of Tenants() and the maintenance cron
@@ -417,10 +630,44 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 			return err
 		})
 
+		if cfg.ScoringEnabled {
+			// Scrape→score coupling: each tenant's scrape chains straight into a
+			// budgeted scoring pass so fresh listings are ranked the same cycle
+			// instead of waiting out the gap to the next scoring cron tick.
+			if cfg.ScoreAfterScrape {
+				sched.SetScoringHook(func(ctx context.Context, r *db.Repository) error {
+					tryScoreTenant(r.UserID(), logger, func() {
+						if _, err := runScoringPass(ctx, cfg, r, logger); err != nil {
+							logger.Error("post-scrape scoring failed", "user_id", r.UserID(), "error", err)
+						}
+					})
+					return nil
+				})
+			}
+			// Onboarding burst: score a signup's best seed matches while its first
+			// scrape is still running. Gated to tenants with zero scored rows:
+			// RunOnceForUser also serves the "Scrape now" button, and established
+			// tenants must not re-trigger the burst's quota allowance on every press
+			// (they are covered by the post-scrape pass above).
+			if cfg.OnboardBurstLimit > 0 {
+				sched.SetOnboardBurstHook(func(ctx context.Context, r *db.Repository, keywords []string) error {
+					if n, err := r.CountScored(); err != nil || n > 0 {
+						return err
+					}
+					tryScoreTenant(r.UserID(), logger, func() {
+						if _, err := runOnboardingBurst(ctx, cfg, r, keywords, logger); err != nil {
+							logger.Error("onboarding burst failed", "user_id", r.UserID(), "error", err)
+						}
+					})
+					return nil
+				})
+			}
+		}
+
 		// On-demand trigger: the dashboard's "Scrape now" button posts here to kick
 		// off a scrape. It shares the scheduler's in-flight guard, so manual and
 		// cron runs can't overlap. Reachable only inside the compose network.
-		trig := trigger.New(sched, cfg.ScrapeTimeout, logger)
+		trig := trigger.New(sched, cfg.ScrapeTimeout, cfg.GlobalScrapeTimeout, logger)
 		go func() {
 			if err := trig.Listen(ctx, cfg.TriggerAddr); err != nil {
 				logger.Error("trigger server error", "error", err)
@@ -452,11 +699,27 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		dash.SetAuth(buildDashboardAuth(ctx, cfg, logger), cfg.SupabaseURL, cfg.SupabaseAnonKey)
 		dash.SetAuthAdminDSN(cfg.DatabaseURL)
 		dash.SetRateLimit(cfg.RateLimitPerMinute, cfg.RateLimitBurst)
+		dash.SetMarketAllTimeWindowDays(cfg.MarketAllTimeWindowDays)
 		// Fresh config per run so Sync now picks up credentials saved in the
 		// Settings modal without a restart.
 		dash.SetRejectionSyncRunner(func(runCtx context.Context) (rejectionsync.Summary, error) {
 			return runRejectionSync(runCtx, config.Load(), repo, logger)
 		})
+		// A tenant returning from an inactive stretch was keep-warm gated (see
+		// inactiveKeepWarmCap); their first dashboard load kicks a full scoring
+		// pass right away instead of waiting for the cron. Fresh config so the
+		// pass honors settings saved since boot; tryScoreTenant dedupes overlap.
+		if cfg.ScoringEnabled {
+			dash.SetScoringKick(cfg.ScoringActiveWindowDays, func(uid string) {
+				fresh := config.Load()
+				tr := repo.ForUser(uid)
+				tryScoreTenant(uid, logger, func() {
+					if _, err := runScoringPass(ctx, fresh, tr, logger); err != nil {
+						logger.Warn("return-kick scoring failed", "user_id", uid, "error", err)
+					}
+				})
+			})
+		}
 		go func() {
 			if err := dash.Listen(ctx, cfg.DashboardAddr); err != nil {
 				logger.Error("dashboard server error", "error", err)
@@ -468,16 +731,30 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 			startScoringCron(ctx, cfg, repo, logger)
 		}
 
+		// Gemini Batch API backlog drain: submit + poll on its own slow tick.
+		startBatchScoreLoop(ctx, cfg, repo, logger)
+
 		// DB maintenance (dedup + auto-ghost), ported from the Node worker.
 		startMaintenanceCron(ctx, cfg, repo, logger)
+		// Gmail rejection sweep + context update on their own faster cadence
+		// (IMAP + regex, no Gemini), so a rejection email reaches the pipeline
+		// stages within the half hour instead of the 6-hour maintenance tick.
+		startRejectionSyncCron(ctx, cfg, repo, logger)
 		startCanonicalizeCron(ctx, cfg, repo, logger)
+		// Monthly Common Crawl registry seed: grow the global company pool with
+		// employers no tenant has encountered yet (zero Gemini). Global, so it runs
+		// once against the root repo, not per tenant.
+		startRegistrySeedCron(ctx, cfg, repo, logger)
 		// Market research warms once a day on its own schedule (see comment in
 		// runMaintenance): refreshing it loads every job's description, so it must not
 		// ride the 30-minute maintenance fan-out.
 		startMarketResearchCron(ctx, cfg, repo, logger)
 
 		if cfg.ScrapeOnStart {
-			runCtx, cancel := context.WithTimeout(ctx, cfg.ScrapeTimeout)
+			// The startup scrape is a full cycle (global board union or the
+			// all-tenant fan-out), so it gets the full-cycle budget: the flat
+			// per-tenant timeout truncated the 800-board global pass on prod.
+			runCtx, cancel := context.WithTimeout(ctx, cfg.GlobalScrapeTimeout)
 			if _, _, err := sched.RunOnceGuarded(runCtx); err != nil {
 				logger.Error("startup scrape failed", "error", err)
 			}
@@ -488,19 +765,21 @@ their profile directory. Irreversible. The literal word "confirm" is required.`)
 		// cron. Gated on ScoringEnabled so it never runs when scoring is off.
 		if cfg.ScoringEnabled && cfg.ScoreOnStart {
 			forEachTenant(repo, cfg.DataDir, logger, func(tr *db.Repository) {
-				res, err := runScoringPass(ctx, cfg, tr, logger)
-				if err != nil {
-					logger.Error("startup scoring failed", "user_id", tr.UserID(), "error", err)
-				} else {
-					logger.Info("startup scoring complete", "user_id", tr.UserID(), "scored_ok", res.ScoredOK, "scored_failed", res.ScoredFailed)
-				}
+				tryScoreTenant(tr.UserID(), logger, func() {
+					res, err := runScoringPass(ctx, cfg, tr, logger)
+					if err != nil {
+						logger.Error("startup scoring failed", "user_id", tr.UserID(), "error", err)
+					} else {
+						logger.Info("startup scoring complete", "user_id", tr.UserID(), "scored_ok", res.ScoredOK, "scored_failed", res.ScoredFailed)
+					}
+				})
 			})
 		}
 		// Keep the Market Research body cache hot in the background (this same
 		// process serves the dashboard), so visits skip the cold rebuild that
 		// re-fetches every job. Launched after the optional startup scrape/scoring
 		// so the first warm renders settled data.
-		go warmMarketResearchLoop(ctx, dash, repo, cfg.DataDir, logger)
+		go warmMarketResearchLoop(ctx, dash, repo, cfg.DataDir, cfg.MarketWarmInterval, logger)
 		if err := sched.Start(ctx); err != nil {
 			logger.Error("scheduler error", "error", err)
 			os.Exit(1)
@@ -532,6 +811,64 @@ func runQueueWorker(ctx context.Context, cfg config.Config, logger *slog.Logger)
 	<-ctx.Done()
 	server.Shutdown()
 	return nil
+}
+
+// runOpsAgent serves the self-healing agent: the Alertmanager webhook receiver,
+// this workload's /metrics, and an in-process cron for the periodic sweep.
+//
+// It deliberately does not open the database or talk to the scraper. Its blast
+// radius is the allowlist in internal/opsagent/gate.go, bounded again by the
+// RBAC on its ServiceAccount.
+func runOpsAgent(ctx context.Context, logger *slog.Logger) error {
+	agentCfg, err := opsagent.LoadConfig()
+	if err != nil {
+		return err
+	}
+	agent, err := opsagent.New(agentCfg, logger)
+	if err != nil {
+		return err
+	}
+	srv := opsagent.NewServer(agent, agentCfg)
+
+	c := cron.New()
+	if err := srv.StartSweep(c); err != nil {
+		return fmt.Errorf("register sweep schedule %q: %w", agentCfg.SweepSchedule, err)
+	}
+	c.Start()
+	defer c.Stop()
+
+	httpSrv := &http.Server{
+		Addr:              agentCfg.ListenAddr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	logger.Info("opsagent started",
+		"addr", agentCfg.ListenAddr,
+		"model", agentCfg.Model,
+		"fallback_model", agentCfg.FallbackModel,
+		"daily_call_budget", agentCfg.DailyCallBudget,
+		"dry_run", agentCfg.DryRun,
+		"enabled_actions", agentCfg.EnabledActionNames(),
+		"writable_namespaces", agentCfg.WritableNamespaceNames(),
+		"sweep_schedule", agentCfg.SweepSchedule,
+	)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return httpSrv.Shutdown(shutdownCtx)
 }
 
 // buildScorer wires a Gemini client (with the repo as its usage recorder) into a
@@ -620,7 +957,9 @@ func buildGeminiClient(cfg config.Config, repo *db.Repository, logger *slog.Logg
 	if repo != nil {
 		client = client.WithTenant(repo.UserID())
 	}
-	return client.WithHostKey(cfg.GeminiAPIKey != "")
+	return client.WithHostKey(cfg.GeminiAPIKey != "").
+		WithOverflowKey(cfg.GeminiOverflowAPIKey, cfg.GeminiOverflowRateDelay).
+		WithThinkingLevel(cfg.ScoringThinkingLevel)
 }
 
 // parseAddCompanyArgs reads the add-company subcommand flags (--name/--url/
@@ -666,17 +1005,49 @@ func parseAddCompanyArgs(argv []string) struct {
 	return out
 }
 
-// scoreConfig builds the pipeline knobs. hostKey flags a run on the shared host
-// key so ScoreUnscored also clamps the run to the host key's global daily ceiling.
-func scoreConfig(cfg config.Config, hostKey bool) pipeline.ScoreConfig {
+// scoreConfig builds the pipeline knobs for a tenant. hostKey flags a run on
+// the shared host key so ScoreUnscored also clamps the run to the host key's
+// global daily ceiling. The repo scopes the tenant whose saved location prefs
+// feed the pre-score prefilter.
+func scoreConfig(cfg config.Config, hostKey bool, repo *db.Repository) pipeline.ScoreConfig {
 	return pipeline.ScoreConfig{
 		DailyLimit:              cfg.GeminiDailyLimit,
 		Concurrency:             cfg.ScoringConcurrency,
 		ArchiveThreshold:        cfg.AutoArchiveThreshold,
 		BatchSize:               cfg.ScoringBatchSize,
+		Prefilter:               locationPrefilter(cfg, repo),
+		UseExtracts:             cfg.ScoringUseExtracts,
+		ExtractBatchSize:        cfg.ScoringExtractBatchSize,
+		ResumeHash:              tenantResumeHash(cfg, repo),
 		HostKey:                 hostKey,
 		HostDailyLimit:          cfg.GeminiHostDailyLimit,
 		HostPerTenantDailyLimit: cfg.GeminiHostPerTenantDailyLimit,
+	}
+}
+
+// tenantResumeHash hashes the tenant's resume.md for score stamping; a missing
+// or empty resume yields "" and stamping is skipped.
+func tenantResumeHash(cfg config.Config, repo *db.Repository) string {
+	data, err := os.ReadFile(filepath.Join(tenantProfileDir(cfg, repo), "resume.md"))
+	if err != nil {
+		return ""
+	}
+	return scorer.HashResume(string(data))
+}
+
+// locationPrefilter returns the tenant's pre-score location gate, or nil when
+// the flag is off or the tenant has no saved prefs (default prefs pass every
+// job, so nil skips the per-job work entirely).
+func locationPrefilter(cfg config.Config, repo *db.Repository) pipeline.PrefilterFunc {
+	if !cfg.PrefilterLocation {
+		return nil
+	}
+	prefs := jobfilter.Load(tenantProfileDir(cfg, repo))
+	if prefs.IsDefault() {
+		return nil
+	}
+	return func(location, title string) (bool, string) {
+		return jobfilter.Evaluate(location, title, prefs)
 	}
 }
 
@@ -684,7 +1055,105 @@ func scoreConfig(cfg config.Config, hostKey bool) pipeline.ScoreConfig {
 // Centralizing it keeps the three call sites (score-once, startup, cron) identical.
 func runScoringPass(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) (pipeline.ScoreResult, error) {
 	hostKey := cfg.GeminiAPIKey != ""
-	return pipeline.ScoreUnscored(ctx, repo, buildScorer(cfg, repo, logger), scoreConfig(cfg, hostKey), logger)
+	// Extract-once runs ahead of the tenant's scoring so fresh listings have
+	// shared facts ready by the time they are scored. Failures never block
+	// scoring: a job without an extract scores via the full-description path.
+	if cfg.ExtractEnabled {
+		ex := scorer.NewExtractor(buildGeminiClient(cfg, repo, logger))
+		if _, err := pipeline.ExtractPending(ctx, repo, ex, pipeline.ExtractConfig{
+			DailyLimit:  cfg.ExtractDailyLimit,
+			Concurrency: cfg.ScoringConcurrency,
+		}, logger); err != nil {
+			logger.Warn("extract pass failed", "user_id", repo.UserID(), "error", err)
+		}
+	}
+	sc := scoreConfig(cfg, hostKey, repo)
+	if keepWarm := inactiveKeepWarmCap(cfg, repo, logger); keepWarm > 0 {
+		sc.MaxJobs = keepWarm
+		// The per-pass cap alone is not a budget: the pipeline runs many passes a
+		// day, so keep-warm also needs the daily ceiling to stay cheap.
+		sc.InactiveDailyLimit = cfg.GeminiHostInactiveDailyLimit
+		logger.Info("tenant inactive; keep-warm scoring only",
+			"user_id", repo.UserID(), "max_jobs", keepWarm, "window_days", cfg.ScoringActiveWindowDays,
+			"daily_limit", cfg.GeminiHostInactiveDailyLimit)
+	}
+	return pipeline.ScoreUnscored(ctx, repo, buildScorer(cfg, repo, logger), sc, logger)
+}
+
+// inactiveKeepWarmCap returns the keep-warm top-N cap when this tenant has no
+// recent dashboard activity, or 0 (no cap, full scoring) for active tenants.
+// Any read error fails open: mis-gating an active tenant is worse than
+// spending a pass on an inactive one. When the tenant returns, the dashboard's
+// scoring kick (SetScoringKick) plus a fresh last-seen stamp restore full
+// scoring immediately.
+func inactiveKeepWarmCap(cfg config.Config, repo *db.Repository, logger *slog.Logger) int {
+	if cfg.ScoringActiveWindowDays <= 0 || cfg.ScoringInactiveTopN <= 0 {
+		return 0
+	}
+	lastSeen, err := repo.DashboardLastSeen()
+	if err != nil {
+		logger.Warn("last-seen read failed; treating tenant as active", "user_id", repo.UserID(), "error", err)
+		return 0
+	}
+	hasScores := true
+	if lastSeen == "" {
+		n, err := repo.CountScoredJobs()
+		if err != nil {
+			logger.Warn("scored-count read failed; treating tenant as active", "user_id", repo.UserID(), "error", err)
+			return 0
+		}
+		hasScores = n > 0
+	}
+	if tenantActive(lastSeen, hasScores, cfg.ScoringActiveWindowDays, time.Now()) {
+		return 0
+	}
+	return cfg.ScoringInactiveTopN
+}
+
+// tenantActive reports whether a tenant qualifies for full scoring: dashboard
+// seen within the window, or never seen but with nothing scored yet (a
+// brand-new signup mid-onboarding must not be starved before their first
+// dashboard load writes a stamp). Stamps are fixed-width UTC
+// "2006-01-02 15:04:05", so a lexical compare is a time compare.
+func tenantActive(lastSeen string, hasScores bool, windowDays int, now time.Time) bool {
+	if lastSeen == "" {
+		return !hasScores
+	}
+	cutoff := now.UTC().AddDate(0, 0, -windowDays).Format("2006-01-02 15:04:05")
+	return lastSeen >= cutoff
+}
+
+// scoringInFlight serializes scoring per tenant across the cron, the startup
+// pass, the post-scrape hook, and the onboarding burst. Overlap would not
+// corrupt anything (score writes are idempotent updates), but two passes would
+// pick the same unscored rows and spend duplicate Gemini calls. A skipped pass
+// is fine: the scoring cron remains the sweeper.
+var scoringInFlight sync.Map
+
+// tryScoreTenant runs fn unless a scoring pass for uid is already in flight, and
+// reports whether fn ran.
+func tryScoreTenant(uid string, logger *slog.Logger, fn func()) bool {
+	if _, loaded := scoringInFlight.LoadOrStore(uid, struct{}{}); loaded {
+		logger.Info("scoring already in flight for tenant; skipping", "user_id", uid)
+		return false
+	}
+	defer scoringInFlight.Delete(uid)
+	fn()
+	return true
+}
+
+// runOnboardingBurst scores a brand-new tenant's best seed matches immediately.
+// The client may be forced onto the billed overflow key by
+// ONBOARD_BURST_PREFER_OVERFLOW; otherwise it is free-key-first, and a 429-dry
+// free key already fails over to the overflow key on the first probe call via
+// the client's cooldown, so the burst never sleeps out a dead key's backoff.
+func runOnboardingBurst(ctx context.Context, cfg config.Config, repo *db.Repository, keywords []string, logger *slog.Logger) (pipeline.ScoreResult, error) {
+	client := buildGeminiClient(cfg, repo, logger).WithPreferOverflow(cfg.OnboardBurstPreferOverflow)
+	sc := scorer.New(client, tenantProfileDir(cfg, repo)).
+		WithRescoreThreshold(cfg.ScoringRescoreThreshold)
+	return pipeline.ScoreOnboardingBurst(ctx, repo, sc, keywords,
+		scoreConfig(cfg, cfg.GeminiAPIKey != "", repo),
+		pipeline.BurstConfig{Limit: cfg.OnboardBurstLimit}, logger)
 }
 
 // forEachTenant runs fn once per background tenant, each with a repo scoped to
@@ -696,6 +1165,7 @@ func runScoringPass(ctx context.Context, cfg config.Config, repo *db.Repository,
 // transient error degrades to today's single-tenant behavior rather than skipping
 // the whole cycle.
 func forEachTenant(repo *db.Repository, dataDir string, logger *slog.Logger, fn func(repo *db.Repository)) {
+	repairStalledProfiles(repo, dataDir, logger)
 	tenants, err := repo.BackgroundTenants(dataDir)
 	if err != nil {
 		logger.Error("tenant enumeration failed; running single pass", "error", err)
@@ -711,6 +1181,18 @@ func forEachTenant(repo *db.Repository, dataDir string, logger *slog.Logger, fn 
 	}
 }
 
+// repairStalledProfiles completes any tenant profile abandoned between the
+// wizard's resume upload and its final search-terms step, so the tenant joins
+// this cycle's fan-out instead of sitting at zero jobs forever. It runs ahead of
+// every background fan-out (and once at startup) because the stall is invisible
+// otherwise: nothing errors, the signup just never receives a job.
+func repairStalledProfiles(repo *db.Repository, dataDir string, logger *slog.Logger) {
+	for _, r := range db.RepairStalledProfiles(dataDir, repo.DBType()) {
+		logger.Warn("stalled onboarding repaired; derived search terms from resume",
+			"user_id", r.UserID, "terms", strings.Join(r.Terms, ", "))
+	}
+}
+
 // refreshMetricsGauges periodically publishes the per-tenant unscored backlog and
 // Gemini usage gauges (plus the global host-key usage), so Grafana shows live
 // values even between scrape and scoring passes. It returns when ctx is cancelled.
@@ -720,7 +1202,9 @@ func refreshMetricsGauges(ctx context.Context, cfg config.Config, repo *db.Repos
 		hostSet := false
 		forEachTenant(repo, cfg.DataDir, logger, func(tr *db.Repository) {
 			if n, err := tr.CountUnscored(); err == nil {
-				metrics.SetJobsPending(tr.UserID(), n)
+				// Same activity verdict the scoring paths use, so the backlog
+				// panels split along the line paid batch scoring actually drains.
+				metrics.SetJobsPending(tr.UserID(), n, inactiveKeepWarmCap(cfg, tr, logger) == 0)
 			}
 			if used, err := tr.DailyAPIUsage(scorer.Model); err == nil {
 				metrics.SetGeminiUsage(tr.UserID(), used)
@@ -737,6 +1221,14 @@ func refreshMetricsGauges(ctx context.Context, cfg config.Config, repo *db.Repos
 				}
 				if tokens, err := tr.HostDailyAPITokens(scorer.Model); err == nil {
 					metrics.SetGeminiHostTokenUsage(tokens.Prompt, tokens.CachedPrompt, tokens.Candidates, tokens.Total)
+				}
+				// Batch API spend is ledgered under its own model key (so the
+				// sync-quota gauges above stay honest); publish it as its own
+				// series so total-spend panels can add the two.
+				if used, err := tr.HostDailyAPIUsage(scorer.BatchModel); err == nil {
+					if tokens, err := tr.HostDailyAPITokens(scorer.BatchModel); err == nil {
+						metrics.SetGeminiBatchUsage(used, tokens.Prompt, tokens.CachedPrompt, tokens.Candidates, tokens.Total)
+					}
 				}
 			}
 		})
@@ -757,13 +1249,60 @@ func refreshMetricsGauges(ctx context.Context, cfg config.Config, repo *db.Repos
 			}
 			metrics.SetOnboardedTenantsJobless(jobless)
 		}
+		// Batch-scoring loop state is cross-tenant; read once per tick. Cheap
+		// counts over the small score_batches ledger.
+		if open, err := repo.CountOpenScoreBatches(); err == nil {
+			sinceUTC := time.Now().UTC().Format("2006-01-02") + " 00:00:00"
+			if jobsToday, err := repo.SumBatchJobsSubmittedSince(sinceUTC); err == nil {
+				oldestAge := 0.0
+				if created, err := repo.OldestOpenScoreBatchCreatedAt(); err == nil && created != "" {
+					if ts, err := time.Parse("2006-01-02 15:04:05", created); err == nil {
+						oldestAge = time.Since(ts).Seconds()
+					}
+				}
+				metrics.SetScoreBatchState(open, jobsToday, oldestAge)
+			}
+		}
+		// global_jobs is a single cross-tenant table, so read it once per tick (not
+		// per tenant). A COUNT/COUNT(DISTINCT) is light: it never reads descriptions,
+		// so it stays clear of the egress-sensitive description reads.
+		if total, companies, err := repo.CountGlobalJobsCache(); err == nil {
+			metrics.SetGlobalJobsCache(total, companies)
+		}
+		// company_registry is likewise global: one grouped COUNT per tick makes the
+		// board inventory (the stage upstream of global_jobs) visible in Grafana.
+		if counts, err := repo.CountRegistryBoardsByPlatform(); err == nil {
+			metrics.SetRegistryBoards(counts)
+		}
+		// Active-user gauges: distinct tenants who opened their dashboard within
+		// each trailing window (metadata.dashboard_last_seen). This is the real
+		// engagement signal cost decisions need, since stage-change events
+		// undercount tenants who browse their ranked list without moving a job.
+		now := time.Now().UTC()
+		for _, w := range []struct {
+			label string
+			since time.Time
+		}{
+			{"1d", now.AddDate(0, 0, -1)},
+			{"7d", now.AddDate(0, 0, -7)},
+			{"30d", now.AddDate(0, 0, -30)},
+		} {
+			if n, err := repo.CountActiveUsers(w.since.Format("2006-01-02 15:04:05")); err == nil {
+				metrics.SetActiveUsers(w.label, n)
+			}
+		}
 	}
 	tick()
 	// Every tick fans out per tenant (CountUnscored + DailyAPIUsage) plus a
 	// Tenants() scan, so this is a small but constant stream of Postgres round trips
 	// over the remote pooler. These gauges only need to be roughly live for Grafana,
-	// so 5 minutes is plenty and cuts the round-trip volume ~5x.
-	t := time.NewTicker(5 * time.Minute)
+	// so the interval is generous (METRICS_REFRESH_INTERVAL_MS, default 15 min) to
+	// cut the round-trip volume.
+	interval := cfg.MetricsRefreshInterval
+	if interval <= 0 {
+		interval = 15 * time.Minute
+	}
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -775,15 +1314,12 @@ func refreshMetricsGauges(ctx context.Context, cfg config.Config, repo *db.Repos
 	}
 }
 
-// marketWarmInterval is how often the warm loop re-checks each tenant's Market
-// Research signature. Idle ticks cost one cheap signature query per tenant; a
-// full rebuild runs only after a tenant's jobs change (the daily scrape or a
-// scoring pass), keeping the rendered body hot so visits skip the cold rebuild.
-// 5 minutes rather than 60s: the page also rebuilds lazily on view, so the warm
-// loop only saves the occasional cold visit, and a per-minute signature query per
-// tenant ran 1440 times a day each for no real benefit. 5 minutes keeps the body
-// warm while cutting that idle pooler chatter ~5x.
-const marketWarmInterval = 5 * time.Minute
+// defaultMarketWarmInterval is the fallback re-warm cadence when
+// MARKET_WARM_INTERVAL_MS is unset. Idle ticks cost one cheap signature query per
+// tenant; a full rebuild runs only after a tenant's jobs change. The page also
+// rebuilds lazily on view, so the warm loop only saves the occasional cold visit,
+// which is why this is generous (30 min) rather than per-minute.
+const defaultMarketWarmInterval = 30 * time.Minute
 
 // warmMarketResearchLoop keeps each tenant's Market Research body cache hot in
 // the dashboard process so a visit lands on the in-memory memo instead of the
@@ -791,15 +1327,19 @@ const marketWarmInterval = 5 * time.Minute
 // dash shares one market cache across its forUser clones, so warming here is what
 // the HTTP path later reads. The first tick warms immediately (covers the cold
 // cache after a deploy/restart); thereafter it re-warms only tenants whose data
-// changed. Returns when ctx is cancelled.
-func warmMarketResearchLoop(ctx context.Context, dash *dashboard.Server, repo *db.Repository, dataDir string, logger *slog.Logger) {
+// changed. interval <= 0 falls back to defaultMarketWarmInterval. Returns when
+// ctx is cancelled.
+func warmMarketResearchLoop(ctx context.Context, dash *dashboard.Server, repo *db.Repository, dataDir string, interval time.Duration, logger *slog.Logger) {
 	tick := func() {
 		forEachTenant(repo, dataDir, logger, func(tr *db.Repository) {
 			dash.WarmMarketResearch(tr.UserID())
 		})
 	}
 	tick()
-	t := time.NewTicker(marketWarmInterval)
+	if interval <= 0 {
+		interval = defaultMarketWarmInterval
+	}
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -828,11 +1368,138 @@ func tenantProfileDir(cfg config.Config, repo *db.Repository) string {
 func startScoringCron(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) {
 	startCron(ctx, logger, "scoring", cfg.ScoreSchedule, func() {
 		forEachTenant(repo, cfg.DataDir, logger, func(tr *db.Repository) {
-			if _, err := runScoringPass(ctx, cfg, tr, logger); err != nil {
-				logger.Error("scheduled scoring failed", "user_id", tr.UserID(), "error", err)
-			}
+			tryScoreTenant(tr.UserID(), logger, func() {
+				if _, err := runScoringPass(ctx, cfg, tr, logger); err != nil {
+					logger.Error("scheduled scoring failed", "user_id", tr.UserID(), "error", err)
+				}
+			})
 		})
 	})
+}
+
+// startBatchScoreLoop drives the Gemini Batch API backlog drain: every tick it
+// polls open batches (applying finished results) and fills free batch slots
+// with ACTIVE tenants' unscored jobs. Gated on SCORING_BATCH_API_ENABLED plus
+// the paid overflow key (the free tier has no batch quota). All batch state is
+// in the DB, so restarts mid-flight lose nothing.
+func startBatchScoreLoop(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) {
+	if !cfg.ScoringBatchAPIEnabled {
+		return
+	}
+	if cfg.GeminiOverflowAPIKey == "" {
+		logger.Warn("batch scoring enabled but GEMINI_API_KEY_OVERFLOW is empty; batch loop not started")
+		return
+	}
+	interval := time.Duration(cfg.BatchAPIPollMinutes) * time.Minute
+	if interval <= 0 {
+		interval = 20 * time.Minute
+	}
+	var running atomic.Bool
+	logger.Info("batch-score loop started", "interval", interval.String())
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if !running.CompareAndSwap(false, true) {
+					logger.Info("batch-score pass skipped: previous pass still running")
+					continue
+				}
+				runBatchScorePass(ctx, repo, logger)
+				running.Store(false)
+			}
+		}
+	}()
+}
+
+// batchSubmitRotation staggers which tenant gets first claim on the free batch
+// slots each pass, so a large-backlog tenant can't monopolize them.
+var batchSubmitRotation atomic.Uint64
+
+// batchSubmitCooldownUntil is the unix time before which batch SUBMISSION is
+// paused after a quota-exhausted (429) submit; polling and applying results
+// keep running. In-memory on purpose: a restart clears it, and quota that came
+// back sooner (a top-up) just waits out the remainder.
+var batchSubmitCooldownUntil atomic.Int64
+
+func runBatchScorePass(ctx context.Context, repo *db.Repository, logger *slog.Logger) {
+	// Reload config each pass (dashboard-saved settings, key rotation) like the
+	// other crons.
+	fresh := config.Load()
+	if !fresh.ScoringBatchAPIEnabled || fresh.GeminiOverflowAPIKey == "" {
+		return
+	}
+	api := scorer.NewBatchClient(fresh.GeminiOverflowAPIKey, logger).WithThinkingLevel(fresh.ScoringThinkingLevel)
+	bcfg := pipeline.BatchScoreConfig{
+		MaxOpenBatches:   fresh.BatchAPIMaxOpenBatches,
+		DailyJobLimit:    fresh.BatchAPIDailyJobLimit,
+		MaxJobsPerSubmit: fresh.BatchAPIMaxJobsPerSubmit,
+		ArchiveThreshold: fresh.AutoArchiveThreshold,
+	}
+
+	if _, err := pipeline.PollScoreBatches(ctx, repo, api, func(uid string) pipeline.BatchTenant {
+		return batchTenant(fresh, repo, uid, logger)
+	}, bcfg, logger); err != nil {
+		logger.Warn("batch poll pass failed", "error", err)
+	}
+
+	if until := batchSubmitCooldownUntil.Load(); until > time.Now().Unix() {
+		logger.Info("batch submit skipped: quota cooldown active",
+			"until", time.Unix(until, 0).UTC().Format(time.RFC3339))
+		return
+	}
+
+	tenants, err := repo.BackgroundTenants(fresh.DataDir)
+	if err != nil {
+		logger.Warn("batch tenant enumeration failed", "error", err)
+		return
+	}
+	var active []pipeline.BatchTenant
+	for _, uid := range tenants {
+		t := batchTenant(fresh, repo, uid, logger)
+		// Paid batch spend follows the same activity gate as full sync scoring:
+		// inactive tenants stay on the free keep-warm path only.
+		if inactiveKeepWarmCap(fresh, t.Repo, logger) > 0 {
+			continue
+		}
+		active = append(active, t)
+	}
+	if len(active) == 0 {
+		return
+	}
+	rot := int(batchSubmitRotation.Add(1)) % len(active)
+	rotated := append(append([]pipeline.BatchTenant{}, active[rot:]...), active[:rot]...)
+	if _, err := pipeline.SubmitScoreBatches(ctx, repo, api, rotated, bcfg, logger); err != nil {
+		if errors.Is(err, scorer.ErrQuotaExhausted) {
+			cooldown := time.Duration(fresh.BatchAPIQuotaCooldownMinutes) * time.Minute
+			batchSubmitCooldownUntil.Store(time.Now().Add(cooldown).Unix())
+			metrics.IncScoreBatchQuotaTrip()
+			logger.Warn("batch submit quota exhausted; cooling down submissions",
+				"cooldown", cooldown.String(), "error", err)
+			return
+		}
+		logger.Warn("batch submit pass failed", "error", err)
+	}
+}
+
+// batchTenant assembles one tenant's batch-scoring context from the same
+// pieces the sync path uses (scorer, prefilter, resume hash), so the two
+// scoring paths cannot drift.
+func batchTenant(cfg config.Config, repo *db.Repository, uid string, logger *slog.Logger) pipeline.BatchTenant {
+	tr := repo
+	if uid != db.LocalUser {
+		tr = repo.ForUser(uid)
+	}
+	return pipeline.BatchTenant{
+		UserID:     uid,
+		Repo:       tr,
+		Scorer:     buildScorer(cfg, tr, logger),
+		Prefilter:  locationPrefilter(cfg, tr),
+		ResumeHash: tenantResumeHash(cfg, tr),
+	}
 }
 
 // startCron schedules job on the given cron schedule with a single-flight
@@ -864,7 +1531,12 @@ func startCron(ctx context.Context, logger *slog.Logger, name, schedule string, 
 
 // runMaintenance runs the DB-maintenance passes once: dedup re-posts/duplicates,
 // then auto-ghost stale applied jobs. Best-effort; errors are logged, not fatal.
-func runMaintenance(repo *db.Repository, cfg config.Config, logger *slog.Logger) {
+// ctx cancellation (shutdown) stops the long HTTP passes instead of leaving
+// them running through a SIGTERM. probeCache shares closed-check verdicts and
+// board snapshots across every tenant in one maintenance sweep, so a posting
+// held by N tenants is probed once; nil (the one-shot CLI paths) gets a fresh
+// per-run cache.
+func runMaintenance(ctx context.Context, repo *db.Repository, cfg config.Config, logger *slog.Logger, probeCache *closedcheck.Cache) {
 	if res, err := repo.DedupExistingJobs(); err != nil {
 		logger.Error("dedup failed", "error", err)
 	} else if res.Total() > 0 {
@@ -885,13 +1557,20 @@ func runMaintenance(repo *db.Repository, cfg config.Config, logger *slog.Logger)
 	} else if n > 0 {
 		logger.Info("auto-ghost complete", "ghosted", n, "days", cfg.GhostedAfterDays)
 	}
+	if cfg.ScoringStaleUnscoredDays > 0 {
+		if n, err := repo.ArchiveStaleUnscored(cfg.ScoringStaleUnscoredDays); err != nil {
+			logger.Error("stale-unscored archive failed", "error", err)
+		} else if n > 0 {
+			logger.Info("stale-unscored archive complete", "archived", n, "days", cfg.ScoringStaleUnscoredDays)
+		}
+	}
 	if err := runLogPrune(cfg, logger); err != nil {
 		logger.Warn("log prune failed", "error", err)
 	}
 	if _, err := runDescriptionCheck(repo, cfg, logger); err != nil {
 		logger.Warn("description check failed", "error", err)
 	}
-	if _, err := runClosedCheck(context.Background(), repo, logger); err != nil {
+	if _, err := runClosedCheck(ctx, repo, logger, probeCache); err != nil {
 		logger.Warn("closed check failed", "error", err)
 	}
 	// Market research is intentionally NOT refreshed here. It loads every live and
@@ -900,18 +1579,17 @@ func runMaintenance(repo *db.Repository, cfg config.Config, logger *slog.Logger)
 	// per tenant and was the dominant source of Supabase egress. It now warms once
 	// a day via startMarketResearchCron, and the dashboard builds it lazily on view
 	// (23h cache), so the page stays fresh without the background re-reads.
-	if _, err := runDiscovery(context.Background(), cfg, repo, logger); err != nil {
+	if _, err := runDiscovery(ctx, cfg, repo, logger); err != nil {
 		logger.Warn("company discovery failed", "error", err)
 	}
-	if _, err := runSlugHealth(context.Background(), cfg, repo, logger); err != nil {
+	if _, err := runRegistryURLHarvest(ctx, cfg, repo, logger); err != nil {
+		logger.Warn("registry url harvest failed", "error", err)
+	}
+	if _, err := runSlugHealth(ctx, cfg, repo, logger); err != nil {
 		logger.Warn("slug validation failed", "error", err)
 	}
-	if _, err := runRejectionSync(context.Background(), cfg, repo, logger); err != nil {
-		logger.Warn("rejection email sync failed", "error", err)
-	}
-	if _, err := runContextUpdate(context.Background(), cfg, repo, logger); err != nil {
-		logger.Warn("context update failed", "error", err)
-	}
+	// Rejection sync + context update moved to their own faster cron
+	// (startRejectionSyncCron); see RejectionSyncSchedule in config.
 }
 
 // startMaintenanceCron schedules runMaintenance on cfg.MaintenanceSchedule with a
@@ -922,8 +1600,32 @@ func startMaintenanceCron(ctx context.Context, cfg config.Config, repo *db.Repos
 		// credentials, pause toggle, auto-ghost window) apply on the next
 		// scheduled run instead of waiting for a container restart.
 		fresh := config.Load()
+		probeCache := closedcheck.NewCache()
 		forEachTenant(repo, fresh.DataDir, logger, func(tr *db.Repository) {
-			runMaintenance(tr, fresh, logger)
+			runMaintenance(ctx, tr, fresh, logger, probeCache)
+		})
+	})
+}
+
+// startRejectionSyncCron schedules the Gmail rejection-email sweep (and the
+// context update that persists its stage changes) on cfg.RejectionSyncSchedule,
+// fanning out per tenant. This used to ride the 6-hour maintenance pass, which
+// left rejection emails unreflected in the pipeline for most of a day; the sweep
+// is IMAP + regex with no Gemini calls, so a half-hour cadence costs nothing but
+// the mailbox fetch. runRejectionSync's own single-flight guard keeps this cron
+// and the dashboard's Sync now button from overlapping.
+func startRejectionSyncCron(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) {
+	startCron(ctx, logger, "rejection-sync", cfg.RejectionSyncSchedule, func() {
+		// Reload config each pass so Gmail credentials saved via the dashboard
+		// apply on the next scheduled run instead of after a restart.
+		fresh := config.Load()
+		forEachTenant(repo, fresh.DataDir, logger, func(tr *db.Repository) {
+			if _, err := runRejectionSync(ctx, fresh, tr, logger); err != nil {
+				logger.Warn("rejection email sync failed", "user_id", tr.UserID(), "error", err)
+			}
+			if _, err := runContextUpdate(ctx, fresh, tr, logger); err != nil {
+				logger.Warn("context update failed", "user_id", tr.UserID(), "error", err)
+			}
 		})
 	})
 }
@@ -936,6 +1638,24 @@ func startMaintenanceCron(ctx context.Context, cfg config.Config, repo *db.Repos
 func startMarketResearchCron(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) {
 	startCron(ctx, logger, "market-research", cfg.MarketResearchSchedule, func() {
 		fresh := config.Load()
+		// Market research spends the same shared Gemini key as scoring but was not
+		// gated by it. Once the key was exhausted every tenant still got a refresh
+		// attempt, each burning the full 429 retry ladder, so the fan-out cost more
+		// wall-clock than the scoring it was starving. Check the host ceiling once
+		// up front rather than rediscovering the wall per tenant. The manual
+		// market-research-once subcommand stays ungated: that one is a human asking.
+		if fresh.GeminiAPIKey != "" {
+			ok, hostUsed, err := pipeline.HostQuotaAvailable(repo, fresh.GeminiHostDailyLimit)
+			switch {
+			case err != nil:
+				// Fail open: a usage-read blip should not silently stop the report.
+				logger.Warn("host quota check failed; running market research anyway", "error", err)
+			case !ok:
+				logger.Info("host-key daily quota exhausted; skipping market research refresh",
+					"host_used_today", hostUsed, "host_limit", fresh.GeminiHostDailyLimit)
+				return
+			}
+		}
 		forEachTenant(repo, fresh.DataDir, logger, func(tr *db.Repository) {
 			if _, err := runMarketResearch(ctx, fresh, tr, logger, false); err != nil {
 				logger.Warn("scheduled market research refresh failed", "user_id", tr.UserID(), "error", err)
@@ -945,10 +1665,13 @@ func startMarketResearchCron(ctx context.Context, cfg config.Config, repo *db.Re
 }
 
 // runCanonicalize resolves pending alternate ATS rows once and applies the
-// canonicalization/alias DB transaction for each row.
+// canonicalization/alias DB transaction for each row. The Gemini candidate
+// fallback is only enabled when the paid overflow key is configured: it wins
+// on ~3% of the rows the deterministic resolvers can't handle, which is not
+// worth spending the free key's 500 requests/day scoring budget on.
 func runCanonicalize(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) (ats.CanonicalizeReport, error) {
 	var gemini ats.GeminiClient
-	if cfg.GeminiAPIKey != "" {
+	if cfg.GeminiAPIKey != "" && cfg.GeminiOverflowAPIKey != "" {
 		gemini = buildGeminiClient(cfg, repo, logger)
 	}
 	report, err := ats.CanonicalizeExisting(ctx, repo, ats.CanonicalizeConfig{
@@ -1028,8 +1751,8 @@ func runDescriptionCheck(repo *db.Repository, cfg config.Config, logger *slog.Lo
 	return health, nil
 }
 
-func runClosedCheck(ctx context.Context, repo *db.Repository, logger *slog.Logger) (closedcheck.Result, error) {
-	res, err := closedcheck.Run(ctx, repo, closedcheck.Config{})
+func runClosedCheck(ctx context.Context, repo *db.Repository, logger *slog.Logger, cache *closedcheck.Cache) (closedcheck.Result, error) {
+	res, err := closedcheck.Run(ctx, repo, closedcheck.Config{Cache: cache, Log: logger})
 	if err != nil {
 		return closedcheck.Result{}, err
 	}
@@ -1044,6 +1767,7 @@ func runMarketResearch(ctx context.Context, cfg config.Config, repo *db.Reposito
 	if err != nil {
 		return dashboard.MarketResearchRefresh{}, err
 	}
+	srv.SetMarketAllTimeWindowDays(cfg.MarketAllTimeWindowDays)
 	res, err := srv.RefreshMarketResearch(ctx, force)
 	if err != nil {
 		return dashboard.MarketResearchRefresh{}, err
@@ -1069,11 +1793,12 @@ func runDiscovery(ctx context.Context, cfg config.Config, repo *db.Repository, l
 		gemini = buildGeminiClient(cfg, repo, logger)
 	}
 	dcfg := discovery.Config{
-		DataDir:        tenantProfileDir(cfg, repo),
-		TTLHours:       cfg.DiscoveryTTLHours,
-		CandidateCount: cfg.DiscoveryCandidateCount,
-		Gemini:         gemini,
-		Log:            logger,
+		DataDir:         tenantProfileDir(cfg, repo),
+		TTLHours:        cfg.DiscoveryTTLHours,
+		CandidateCount:  cfg.DiscoveryCandidateCount,
+		BootstrapPasses: cfg.DiscoveryBootstrapPasses,
+		Gemini:          gemini,
+		Log:             logger,
 	}
 	// The global verified-board registry is a shared cache across tenants: a board
 	// any tenant verifies is trusted (HTTP probe skipped) and harvested for reuse.
@@ -1083,6 +1808,26 @@ func runDiscovery(ctx context.Context, cfg config.Config, repo *db.Repository, l
 	report, err := discovery.Run(ctx, dcfg)
 	if err != nil {
 		return discovery.Report{}, err
+	}
+	// Registry harvest is LLM-free and runs every pass (even when the paid Gemini
+	// discovery above is cache-skipped): it adopts globally-verified boards that
+	// have roles matching this tenant's search terms, so a board one tenant found
+	// reaches every other tenant it fits without another Gemini call. A tenant
+	// still in bootstrap gets boosted limits so a fresh signup pulls a useful
+	// slice of the shared registry on its first pass instead of trickling in
+	// steady-state increments.
+	if dcfg.Registry != nil {
+		limits := discovery.HarvestLimits{MaxProbe: cfg.HarvestProbeLimit, MaxAdopt: cfg.HarvestAdoptLimit}
+		if discovery.InBootstrap(dcfg.DataDir) {
+			limits = discovery.HarvestLimits{MaxProbe: cfg.HarvestBootstrapProbe, MaxAdopt: cfg.HarvestBootstrapAdopt}
+		}
+		hr, herr := discovery.Harvest(ctx, dcfg, limits)
+		if herr != nil {
+			logger.Warn("registry harvest failed", "error", herr)
+		} else if hr.Adopted > 0 {
+			logger.Info("registry harvest adopted boards",
+				"adopted", hr.Adopted, "probed", hr.Probed, "boards", hr.Names)
+		}
 	}
 	if report.Skipped {
 		logger.Info("company discovery skipped",
@@ -1104,6 +1849,139 @@ func runDiscovery(ctx context.Context, cfg config.Config, repo *db.Repository, l
 		}
 	}
 	return report, nil
+}
+
+// runRegistryURLHarvest mines the tenant's stored apply URLs for ATS boards and
+// records the live ones in the shared company_registry, so a board the scraper
+// already reached becomes directly scrapeable by every other tenant it matches.
+// It costs no Gemini calls. Boards already trusted in the registry are skipped so
+// each pass probes only genuinely new boards, and steady state does no work.
+func runRegistryURLHarvest(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) (int, error) {
+	if !cfg.RegistryURLHarvest || repo == nil {
+		return 0, nil
+	}
+	urls, err := repo.DistinctATSJobURLs()
+	if err != nil {
+		return 0, err
+	}
+	seen := map[string]bool{}
+	var boards []discovery.VerifiedBoard
+	for _, u := range urls {
+		b, ok := discovery.ParseATSBoardURL(u)
+		if !ok {
+			continue
+		}
+		key := discovery.BoardKey(b)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		boards = append(boards, b)
+	}
+	if len(boards) == 0 {
+		return 0, nil
+	}
+	reg := repo.CompanyRegistry()
+	known, err := reg.Known(ctx)
+	if err != nil {
+		logger.Warn("registry url harvest: registry load failed; probing all", "error", err)
+		known = discovery.Suggested{}
+	}
+	novel := novelBoards(boards, known)
+	if len(novel) == 0 {
+		return 0, nil
+	}
+	live := discovery.VerifyBoards(ctx, nil, novel, 0)
+	if len(live) == 0 {
+		return 0, nil
+	}
+	if err := reg.Upsert(ctx, live); err != nil {
+		return 0, err
+	}
+	logger.Info("registry url harvest complete",
+		"boards_in_urls", len(boards), "probed", len(novel), "added", len(live))
+	return len(live), nil
+}
+
+// novelBoards drops boards already trusted in the registry snapshot so the
+// harvest probes only new ones.
+func novelBoards(boards []discovery.VerifiedBoard, known discovery.Suggested) []discovery.VerifiedBoard {
+	have := map[string]bool{}
+	for _, s := range known.Greenhouse {
+		have["greenhouse:"+discovery.SlugKey(s)] = true
+	}
+	for _, s := range known.Ashby {
+		have["ashby:"+discovery.SlugKey(s)] = true
+	}
+	for _, s := range known.Lever {
+		have["lever:"+discovery.SlugKey(s)] = true
+	}
+	for _, e := range known.Workday {
+		have["workday:"+discovery.WorkdayKey(e)] = true
+	}
+	var out []discovery.VerifiedBoard
+	for _, b := range boards {
+		if key := discovery.BoardKey(b); key != "" && !have[key] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// registrySeedSource attributes Common Crawl-seeded registry rows (first_seen_by).
+const registrySeedSource = "__commoncrawl__"
+
+// runRegistrySeed hunts new ATS board slugs from the newest `crawls` Common Crawl
+// indexes, verifies the live ones, and upserts them into the global
+// company_registry. It grows the shared company pool with employers no tenant has
+// encountered yet, at zero Gemini cost; the per-tenant harvest then distributes
+// them by search-term relevance. Global (not per-tenant), so it runs once against
+// the root repo. The monthly cron passes 1 (only the newest crawl is new each
+// month); a larger count backfills history.
+func runRegistrySeed(ctx context.Context, repo *db.Repository, logger *slog.Logger, crawls int) (int, error) {
+	if repo == nil {
+		return 0, nil
+	}
+	before, err := repo.CountRegistryBoards()
+	if err != nil {
+		logger.Warn("registry seed: count failed", "error", err)
+	}
+	report, err := discovery.HarvestCommonCrawl(ctx, discovery.CommonCrawlConfig{Crawls: crawls, Log: logger})
+	if err != nil {
+		return 0, err
+	}
+	if len(report.Live) == 0 {
+		logger.Info("registry seed: no live boards found", "crawls", report.Crawls, "candidates", report.Candidates)
+		return 0, nil
+	}
+	if _, err := repo.UpsertRegistryBoards(report.Live, registrySeedSource); err != nil {
+		return 0, err
+	}
+	after, err := repo.CountRegistryBoards()
+	if err != nil {
+		logger.Warn("registry seed: count failed", "error", err)
+		after = before
+	}
+	logger.Info("registry seed complete",
+		"crawls", report.Crawls, "candidates", report.Candidates, "live", len(report.Live),
+		"registry_before", before, "registry_after", after, "net_new", after-before)
+	return after - before, nil
+}
+
+// startRegistrySeedCron schedules the Common Crawl registry seed on
+// cfg.RegistrySeedSchedule. An empty schedule disables it. It sweeps
+// cfg.RegistrySeedCrawls crawls per run (default 1: only the newest crawl is new
+// each month).
+func startRegistrySeedCron(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) {
+	if cfg.RegistrySeedSchedule == "" {
+		logger.Info("registry seed cron disabled (empty schedule)")
+		return
+	}
+	startCron(ctx, logger, "registry-seed", cfg.RegistrySeedSchedule, func() {
+		if _, err := runRegistrySeed(ctx, repo, logger, cfg.RegistrySeedCrawls); err != nil {
+			logger.Warn("scheduled registry seed failed", "error", err)
+		}
+	})
 }
 
 func runSlugHealth(ctx context.Context, cfg config.Config, repo *db.Repository, logger *slog.Logger) (slughealth.Summary, error) {

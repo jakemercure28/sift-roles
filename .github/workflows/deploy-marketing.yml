@@ -1,0 +1,41 @@
+name: Deploy marketing site
+
+# CD for the static marketing site (marketing/ -> Cloudflare Pages project
+# sift-marketing, served at the apex siftroles.com). Independent of the ThinkPad
+# app deploy (deploy.yml): only fires when marketing/ actually changes, so app
+# deploys never redeploy the site and vice versa.
+#
+# Requires two repo secrets:
+#   CLOUDFLARE_API_TOKEN  - token scoped to "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID - the CF account id that owns sift-marketing
+#
+# Manual run: Actions tab -> Deploy marketing site -> Run workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'marketing/**'
+      - '.github/workflows/deploy-marketing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-marketing
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy marketing/ to sift-marketing
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy marketing --project-name=sift-marketing --branch=main --commit-dirty=true

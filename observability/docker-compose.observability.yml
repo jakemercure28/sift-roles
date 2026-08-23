@@ -1,0 +1,158 @@
+# Shared observability stack for the ThinkPad host (compose project jsa-observability).
+#
+# One stack monitors BOTH app stacks (jsa-prod on :3131/:9101/:4041 and
+# jsa-staging on :3132/:9102/:4042). Prometheus joins the app stacks' Docker
+# networks and scrapes their unique container names on the in-container metrics
+# ports. The host loopback port mappings remain useful for local curl debugging.
+# Host- and container-level exporters see everything on the box.
+#
+# Bring up:
+#   docker compose -p jsa-observability -f observability/docker-compose.observability.yml up -d
+#
+# Grafana binds the host loopback only; it is reached from outside via a Cloudflare
+# Tunnel hostname gated by Cloudflare Access (see docs/observability.md).
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    # Join both app stacks' networks so Prometheus scrapes the backends by their
+    # unique container names (jsa-<env>-go-backend-1 etc.) on the in-container
+    # metrics port. On native Linux, loopback-published ports are NOT reachable
+    # via host-gateway, so container-network scraping is the reliable path. The
+    # loopback METRICS_PORT/SCRAPER_METRICS_PORT mappings remain only for local
+    # curl debugging on the host.
+    networks:
+      - default
+      - jsa-prod
+    # Lets this Prometheus reach the k3s Alertmanager NodePort on the host (see
+    # the alerting block in prometheus/prometheus.yml). Without it there is no
+    # route out of the compose network to the cluster, and these rules would go
+    # back to firing into a UI nobody watches.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      # Mount the whole prometheus/ dir, not the single prometheus.yml file: it
+      # also carries alerts.yml (rule_files), and a directory mount survives the
+      # git-checkout file replacement that a single-file bind mount does not (the
+      # container would otherwise keep the old inode and never see rule/config
+      # edits until a full recreate).
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      # Accept remote_write from the k3s Prometheus, which owns the metrics of
+      # anything already migrated to the cluster (staging as of Phase 7). This
+      # keeps ONE Prometheus behind Grafana and alerts.yml during the
+      # migration. Drop it at Phase 8 when this stack retires.
+      - '--web.enable-remote-write-receiver'
+    ports:
+      - '127.0.0.1:9090:9090'
+      # Reachable from k3s pods. Bound to the Tailscale IP (never 0.0.0.0),
+      # same as the supabase Postgres publishes; pods reach it via the
+      # selector-less `compose-prometheus` Service in ns monitoring.
+      - '100.87.101.41:9090:9090'
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+    environment:
+      # Reached through the Cloudflare tunnel hostname; set GRAFANA_DOMAIN in
+      # observability/.env (e.g. grafana.anitajob.xyz). Access provides auth, but
+      # Grafana keeps its own admin login as a second gate.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # No public sign-up; this is a single-operator instance.
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:3000:3000'
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - '127.0.0.1:3100:3100'
+      # Reachable from k3s pods: Alloy ships pod logs here, so this stays the
+      # ONE Loki behind Grafana while the migration runs. Bound to the
+      # Tailscale IP (never 0.0.0.0), same as the Prometheus publish above.
+      - '100.87.101.41:3100:3100'
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command: ['-config.file=/etc/promtail/promtail-config.yml']
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      # Tail every container's json-file logs and read container metadata.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/tmp
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - '/:/host:ro,rslave'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  # Redis lives in the app stacks (docker-compose.infra.yml) on a different network
+  # and is not published, so a redis-exporter here cannot reach it without extra
+  # wiring. cAdvisor already reports the Redis container's CPU/memory, which covers
+  # infra health. Enable this only if you publish Redis to the host loopback and
+  # want keyspace/hit-rate metrics:
+  #
+  # redis-exporter:
+  #   image: oliver006/redis_exporter:v1.66.0
+  #   restart: unless-stopped
+  #   extra_hosts: ['host.docker.internal:host-gateway']
+  #   environment:
+  #     REDIS_ADDR: redis://host.docker.internal:6379
+  #     REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+
+# The prod stack's compose network, joined by Prometheus so it can reach the
+# backends by container name. Created by the jsa-prod stack.
+#
+# jsa-staging is deliberately absent: staging runs on k3s since Phase 6, and
+# an `external: true` reference to a network that no longer exists is a hard
+# startup failure for this whole stack the moment the stopped staging compose
+# project is finally removed.
+networks:
+  jsa-prod:
+    external: true
+    name: jsa-prod_default
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  promtail_positions:
